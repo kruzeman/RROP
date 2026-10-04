@@ -1,0 +1,4 @@
+ymfm by Aaron Giles and contributors
+https://github.com/aaronsgiles/ymfm
+Revision: 81aec25ccbb98f4873a255f7551ac4dadac59b4a
+Selected OPN/FM/ADPCM/SSG files are unmodified; BSD-3-Clause license: LICENSE.

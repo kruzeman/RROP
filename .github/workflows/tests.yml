@@ -1,0 +1,50 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install SDL2 and C++ build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libsdl2-ttf-dev fonts-dejavu-core pkg-config g++
+      - name: Test decoder and compiled translations
+        run: make test
+      - name: Build and execute synthetic ROM
+        run: make demo
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-binutils
+            mingw-w64-ucrt-x86_64-pkgconf
+      - name: Prepare verified Windows SDL SDK
+        run: |
+          python -c "from pathlib import Path; from genesis_recompiler.windows import prepare_sdk; prepare_sdk(Path('build/windows-sdk'))"
+      - name: Test native Windows saves, SDL, fonts, audio and DLL packaging
+        run: |
+          export WINDOWS_SDK="$(cygpath -m "$PWD/build/windows-sdk/x86_64-w64-mingw32")"
+          python -m unittest discover -s tests -p test_windows.py -v
