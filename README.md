@@ -21,6 +21,26 @@ The project focuses on one verified game revision, with optional improvements:
 Classic presentation remains selectable. Interiors and battles use the original
 viewport at 100% zoom to avoid repeating fixed scenes outside their boundaries.
 
+## Screenshots
+
+### Widescreen and zoom
+
+| Closer view | Zoomed-out view |
+| --- | --- |
+| ![Widescreen world with a closer zoom](docs/images/widescreen-close.png) | ![Widescreen world zoomed out](docs/images/widescreen-zoomed-out.png) |
+
+### Original viewport with zoom
+
+| Closer view | Zoomed-out view |
+| --- | --- |
+| ![Original game viewport with a closer zoom](docs/images/original-viewport-close.png) | ![Original game viewport zoomed out](docs/images/original-viewport-zoomed-out.png) |
+
+### Settings
+
+![In-game Settings menu with parchment styling](docs/images/settings.png)
+
+Screenshots were captured during development under the previous GenesisRecomp name.
+
 ## Quick start on Linux
 
 Install Python 3.10+, a C11/C++17 compiler, pkg-config, SDL2 and SDL2_ttf development
