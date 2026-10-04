@@ -61,13 +61,19 @@ static char *resource_default_directory(const char *argv0,const char *relative) 
     if(n>0 && (size_t)n<sizeof executable-1){executable[n]=0;name=executable;}
 #elif defined(__APPLE__)
     uint32_t size=sizeof executable;
-    if(!_NSGetExecutablePath(executable,&size))name=executable;
+    char *resolved=NULL;
+    if(!_NSGetExecutablePath(executable,&size)) {
+        resolved=realpath(executable,NULL);name=resolved ? resolved:executable;
+    }
 #else
     (void)executable;
 #endif
     const char *slash=strrchr(name,'/');size_t prefix=slash ? (size_t)(slash-name)+1:0;
     char *directory=(char *)malloc(prefix+strlen(relative)+1);
     if(directory){memcpy(directory,name,prefix);strcpy(directory+prefix,relative);}
+#ifdef __APPLE__
+    free(resolved);
+#endif
     return directory;
 }
 static int resource_main(int argc,char **argv,const char *relative,size_t rom_size,
