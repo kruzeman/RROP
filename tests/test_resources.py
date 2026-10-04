@@ -135,6 +135,19 @@ int main(int argc,char**argv){
         self.assertEqual(original.read_bytes(),program.rom)
         self.assertEqual(sorted(p.name for p in directory.iterdir()),['manifest.json'])
 
+    @unittest.skipIf(os.name=='nt','symlink creation may require elevated privileges on Windows')
+    def test_symlink_launch_finds_resources_beside_real_executable(self):
+        binary,_,_,_=self.game()
+        links=self.root/'launch links';links.mkdir()
+        link=links/'linked-game';link.symlink_to(Path('..')/'bundle'/'game')
+        for command in ([str(link)],['launch links/linked-game'],['linked-game']):
+            with self.subTest(command=command):
+                result=subprocess.run(command,cwd=self.root,
+                    env={**os.environ,'PATH':str(links)+os.pathsep+os.environ['PATH']},
+                    capture_output=True,text=True)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertIn('status=halted',result.stdout)
+
     def test_failed_recompile_preserves_old_binary_manifest_and_resources(self):
         binary,directory,plan,rom=self.game();previous=binary.read_bytes()
         manifest=(directory/'manifest.json').read_bytes()

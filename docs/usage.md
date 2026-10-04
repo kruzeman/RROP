@@ -79,6 +79,42 @@ additional runtime arguments. For example:
 Choose **Classic** in Settings for the original presentation. Saved Settings
 take precedence over launch defaults.
 
+## macOS (experimental)
+
+Use the same build script as Linux. Requirements are Python 3.10+, Clang
+from Command Line Tools, SDL2 and pkg-config. External fonts additionally
+require SDL2_ttf. No Python package installation is needed.
+
+Install any missing dependencies:
+
+```sh
+xcode-select --install
+brew install python pkgconf sdl2-compat
+# Optional, for external text rendering:
+brew install sdl2_ttf
+```
+
+Homebrew provides the [SDL2 compatibility layer](https://formulae.brew.sh/formula/sdl2-compat)
+and [SDL2_ttf](https://formulae.brew.sh/formula/sdl2_ttf). An existing SDL2
+installation also works.
+
+Place your verified ROM in `roms/`, then run from the project directory:
+
+```sh
+python3 examples/build_rings_of_power.py 'roms/Rings of Power (UE) [!].gen'
+./run-rings-of-power.command
+```
+
+The launcher also opens with a double-click in Finder. Saves and Settings
+are stored in the project's `saves/` directory. For external fonts, build
+with `--text-renderer rings-text` and launch with `--font /path/to/font.ttf`.
+
+Check the tools without a game ROM using `make demo` and `make test`.
+Window tests use SDL's dummy driver; verify a visible window and audible
+sound by launching the game from a regular Terminal or Finder session.
+The executable targets the current Mac; a universal `.app` and portable
+library bundle are not packaged yet.
+
 ## Windows
 
 ### Cross-build from Linux
