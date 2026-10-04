@@ -78,6 +78,41 @@ python3 examples/build_rings_of_power.py 'roms/Rings of Power (UE) [!].gen' \
 Классический режим выбирается в Settings. Сохранённые настройки имеют
 приоритет над начальными флагами запуска.
 
+## macOS (экспериментально)
+
+Используется тот же скрипт сборки, что и в Linux. Нужны Python 3.10+,
+Clang из Command Line Tools и SDL2 с pkg-config. Для внешних шрифтов
+дополнительно нужен SDL2_ttf. Python-пакеты устанавливать не требуется.
+
+Установите недостающие зависимости:
+
+```sh
+xcode-select --install
+brew install python pkgconf sdl2-compat
+# Необязательно, для внешнего текста:
+brew install sdl2_ttf
+```
+
+[SDL2 compatibility layer](https://formulae.brew.sh/formula/sdl2-compat) и
+[SDL2_ttf](https://formulae.brew.sh/formula/sdl2_ttf) доступны в Homebrew.
+Уже установленная SDL2 также подходит.
+
+Положите свой проверенный ROM в `roms/`, затем из папки проекта выполните:
+
+```sh
+python3 examples/build_rings_of_power.py 'roms/Rings of Power (UE) [!].gen'
+./run-rings-of-power.command
+```
+
+Лаунчер можно открыть двойным щелчком в Finder. Сохранения и настройки
+находятся в `saves/` внутри проекта. Для внешних шрифтов добавьте при сборке
+`--text-renderer rings-text`, а при запуске — `--font /путь/к/шрифту.ttf`.
+
+Для проверки инструмента без ROM игры: `make demo` и `make test`.
+Проверки окна используют SDL dummy; видимое окно и звук проверяются
+запуском игры из обычного Terminal/Finder. Сборка нативная для текущего Mac;
+универсальный `.app` и переносимые библиотеки пока не упаковываются.
+
 ## Windows
 
 ### Кросс-сборка из Linux

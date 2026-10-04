@@ -379,6 +379,7 @@ static int run_main(int argc, char **argv, const uint8_t *rom, size_t size, int 
 #endif
     int widescreen=0,zoom=0;const char *wide_dump=NULL;
     int mouse=0,smooth_camera=0;
+    (void)mouse;(void)smooth_camera; /* Optional presentation flags in headless builds. */
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     uint64_t smooth_ms=200;
 #endif

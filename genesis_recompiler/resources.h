@@ -3,6 +3,8 @@
 #define GENESIS_RESOURCES_H
 #ifdef __linux__
 #include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 typedef struct { size_t address, offset, size; } ResourceSpan;
@@ -57,6 +59,9 @@ static char *resource_default_directory(const char *argv0,const char *relative) 
 #ifdef __linux__
     ssize_t n=readlink("/proc/self/exe",executable,sizeof executable-1);
     if(n>0 && (size_t)n<sizeof executable-1){executable[n]=0;name=executable;}
+#elif defined(__APPLE__)
+    uint32_t size=sizeof executable;
+    if(!_NSGetExecutablePath(executable,&size))name=executable;
 #else
     (void)executable;
 #endif
