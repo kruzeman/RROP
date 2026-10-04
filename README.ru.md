@@ -2,6 +2,10 @@
 
 [English](README.md) · [Сборка и запуск](docs/usage-ru.md) · [Настройки](docs/settings-ru.md)
 
+[![Поддержать RROP на Ko-fi](https://storage.ko-fi.com/cdn/kofi2.png)](https://ko-fi.com/O6R42871XC)
+
+Если RROP полезен, можно угостить автора кофе. Спасибо за поддержку разработки!
+
 RROP превращает **Rings of Power** для Sega Genesis / Mega Drive в нативную
 программу для Linux или Windows. Код Motorola 68000 и звуковой программы Z80
 статически переводится в C; исполнение поддерживает модель памяти, графики,

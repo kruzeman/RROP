@@ -2,6 +2,10 @@
 
 [Русская версия](README.ru.md) · [Build and play](docs/usage.md) · [Settings](docs/settings.md)
 
+[![Support RROP on Ko-fi](https://storage.ko-fi.com/cdn/kofi2.png)](https://ko-fi.com/O6R42871XC)
+
+If RROP is useful to you, you can buy the author a coffee. Thank you for supporting development!
+
 RROP translates the Sega Genesis / Mega Drive version of **Rings of Power**
 into a native Linux or Windows executable. It statically recompiles Motorola
 68000 and the game's Z80 sound code to C, with a runtime for the console's
