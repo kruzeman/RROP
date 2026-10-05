@@ -91,6 +91,7 @@ static void rings_save_overlay(SDLHost *h,const VDP *v) {
     SDL_SetRenderDrawBlendMode(h->renderer,SDL_BLENDMODE_NONE);SDL_SetRenderDrawColor(h->renderer,0,0,0,255);
 }
 static void rings_save_host_loaded(SDLHost *h,CPU *c) {
+    sdl_pad_clear(&h->input);
     if(h->settings.ready) {c->ram[0x132]=0;c->ram[0x133]=(uint8_t)h->settings.help;}
 #ifdef GENESIS_RINGS_WIDE
     rings_mouse_reset(&h->mouse);
@@ -113,16 +114,16 @@ static int rings_save_event(SDLHost *h,CPU *c,const SDL_Event *event) {
             int rows=s->menu==1 ? 5:10;
             if(key==SDLK_UP)s->selected=(s->selected+rows-1)%rows;
             if(key==SDLK_DOWN)s->selected=(s->selected+1)%rows;
-            if(key==SDLK_ESCAPE) {s->menu=0;s->message[0]=0;rings_save_input_clear(c);sdl_host_rebase(h,c);}
+            if(key==SDLK_ESCAPE) {s->menu=0;s->message[0]=0;sdl_pad_clear(&h->input);rings_save_input_clear(c);sdl_host_rebase(h,c);}
             if(key==SDLK_RETURN || key==SDLK_x || key==SDLK_z) {
                 int ok=s->menu==1 ? rings_save_write(s,c,s->selected):rings_save_load(s,c,s->selected);
-                if(ok) {s->menu=0;if(s->loaded)rings_save_host_loaded(h,c);else sdl_host_rebase(h,c);s->notice_until=rings_save_now(h)+4000;}
+                if(ok) {sdl_pad_clear(&h->input);s->menu=0;if(s->loaded)rings_save_host_loaded(h,c);else sdl_host_rebase(h,c);s->notice_until=rings_save_now(h)+4000;}
             }
         }
         return 1;
     }
     if(down && !event->key.repeat && (key==SDLK_F5 || key==SDLK_F9)) {
-        rings_save_menu(s,c,key==SDLK_F5 ? 1:2);h->fast_forward=0;sdl_host_rebase(h,c);
+        sdl_pad_clear(&h->input);rings_save_menu(s,c,key==SDLK_F5 ? 1:2);h->fast_forward=0;sdl_host_rebase(h,c);
         if(!s->menu)s->notice_until=rings_save_now(h)+4000;
         return 1;
     }

@@ -144,7 +144,8 @@ int main(void) {
   c->master_cycles+=vdp_master_frequency(&c->vdp)/5;vdp_render(c);assert(sdl_host_service(&h,c));
   assert(!h.camera.active && !h.camera.x);
  }
- c->pad_buttons[0]=PAD_RIGHT;uint64_t clocks=c->master_cycles;
+ SDL_Event held={0};held.type=SDL_KEYDOWN;held.key.keysym.sym=SDLK_RIGHT;
+ assert(SDL_PushEvent(&held)==1);assert(sdl_host_service(&h,c));uint64_t clocks=c->master_cycles;
  SDL_Event e={0};e.type=SDL_KEYDOWN;e.key.keysym.sym=SDLK_F6;assert(SDL_PushEvent(&e)==1);
  assert(sdl_host_service(&h,c));assert(!h.camera.enabled && c->pad_buttons[0]==PAD_RIGHT && c->master_cycles==clocks);
  assert(SDL_PushEvent(&e)==1);assert(sdl_host_service(&h,c));assert(h.camera.enabled);

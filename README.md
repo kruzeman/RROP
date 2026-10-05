@@ -17,6 +17,7 @@ The project focuses on one verified game revision, with optional improvements:
 - Viewport zoom from 50% to 100% and smooth outdoor camera scrolling.
 - Live replacement of the game's text with an external TTF/OTF font.
 - Mouse movement and the game's native automatic walking.
+- SDL2 gamepads, hotplug, presets and custom A/B/C/START buttons.
 - YM2612/PSG sound, Linux builds and Windows x64 packaging.
 - Five manual saves and five rotating autosaves, every five minutes of active play.
 - In-game Settings and save menus styled using the game's parchment.
@@ -69,6 +70,7 @@ python3 examples/build_rings_of_power.py 'roms/Rings of Power (UE) [!].gen' \
 
 Use **F10**, **Esc**, or **System → Settings** to change features; choose **Exit**
 there to quit. Arrow keys move; **Z/X/C** are Genesis **A/B/C**.
+Gamepads work in both modes; see [gamepad controls](docs/gamepads.md).
 See the [manual](docs/usage.md) for Windows, other Linux distributions,
 controls, saves and troubleshooting.
 

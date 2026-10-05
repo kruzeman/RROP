@@ -6,7 +6,8 @@ Open Settings from the sixth main-menu item, **System → Settings**, **F10**,
 or **Esc** during gameplay. The host menu uses the game's parchment styling.
 The original game menus and the added host menus remain separate.
 
-**Mode: Classic** selects the original viewport, pixel font and keyboard input.
+**Mode: Classic** selects the original viewport, pixel font.
+Keyboard and gamepad input, and Control settings, are available in both modes.
 Saves remain available. **Mode: Enhanced** exposes these options:
 
 | Option | Behavior |
@@ -16,7 +17,9 @@ Saves remain available. **Mode: Enhanced** exposes these options:
 | Smooth map | Interpolated outdoor camera scrolling |
 | Zoom | Mouse-wheel zoom between 50% and 100% |
 | Mouse controls | Left-button movement; right-button native automatic walking |
-| Control settings | Placeholder for future key/gamepad configuration |
+| Control settings | Gamepad toggle, presets and A/B/C/START button assignment; available in both modes |
+
+[Gamepad controls](gamepads.md) lists mappings and supported controllers.
 
 Back and Exit are available in both modes. Up/Down selects a row; Enter, X,
 Z or Left/Right changes it. Esc returns; F10 closes Settings. The game and
