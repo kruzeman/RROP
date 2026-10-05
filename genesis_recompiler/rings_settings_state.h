@@ -3,7 +3,7 @@
 #define GENESIS_RINGS_SETTINGS_STATE_H
 #if defined(GENESIS_RINGS_SAVES) && defined(GENESIS_SDL2)
 typedef struct {
-    int ready,menu,selected,controls;
+    int ready,menu,selected,controls,control_selected;
     int enhanced,wide,fullscreen,smooth,zoom,mouse,help;
     unsigned saved_zoom;
     char path[1200],message[160];

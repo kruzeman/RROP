@@ -7,11 +7,13 @@
 #include "rings_camera.h"
 #include "rings_mouse.h"
 #include "rings_settings_state.h"
+#include "gamepad_sdl.h"
 #ifdef GENESIS_RINGS_MENU_FONT
 #include "rings_font_sdl.h"
 #endif
 
 typedef struct {
+    SDLPadInput input;
     SDL_Window *window;
 #ifdef GENESIS_RINGS_SAVES
     RingsSaves *saves;
@@ -43,6 +45,7 @@ typedef struct {
 } SDLHost;
 
 static void sdl_host_close(SDLHost *h) {
+    sdl_pad_close(&h->input);
 #ifdef GENESIS_RINGS_SAVES
     SDL_DestroyTexture(h->settings.paper_texture);
 #endif
@@ -73,6 +76,10 @@ static int sdl_host_open(SDLHost *h) {
     if(!h->zoom_percent)h->zoom_percent=100;
 #endif
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS)) return sdl_host_error(h,"initialization failed");
+    h->input.focused=1;h->input.enabled=1;h->input.instance=-1;
+    if(SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER))
+        fprintf(stderr,"SDL2 gamepad unavailable: %s; keyboard continues\n",SDL_GetError());
+    else sdl_pad_connect(&h->input);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"nearest");
     h->window=SDL_CreateWindow("RROP",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
         h->wide_window ? 1200:960,672,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI);
@@ -368,6 +375,18 @@ static int sdl_host_service(SDLHost *h, CPU *c) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         if (event.type==SDL_QUIT) return 0;
+        int input_menu=0;
+#ifdef GENESIS_RINGS_SAVES
+        input_menu=h->settings.menu || (h->saves && h->saves->menu);
+#endif
+        if(sdl_pad_event(&h->input,&event,input_menu))continue;
+        if(event.type==SDL_KEYUP)h->input.keyboard&=(uint8_t)~sdl_pad_key(event.key.keysym.sym);
+        if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST) {
+            h->input.focused=0;sdl_pad_clear(&h->input);c->pad_buttons[0]=0;
+        }
+        if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED) {
+            sdl_pad_clear(&h->input);h->input.focused=1;
+        }
 #ifdef GENESIS_RINGS_SAVES
         if(rings_settings_event(h,c,&event)) {redraw=1;continue;}
 #endif
@@ -437,7 +456,8 @@ static int sdl_host_service(SDLHost *h, CPU *c) {
                 return 0;
             }
             uint8_t button=sdl_pad_key(key);
-            if (down) c->pad_buttons[0]|=button; else c->pad_buttons[0]&=(uint8_t)~button;
+            if(down && !event.key.repeat)h->input.keyboard|=button;
+            if(!down)h->input.keyboard&=(uint8_t)~button;
             if (key==SDLK_TAB) { h->fast_forward=down; sdl_host_rebase(h,c); }
             if (down && !event.key.repeat && key==SDLK_SPACE && !h->stopped) {
                 h->paused=!h->paused; sdl_host_rebase(h,c);
@@ -445,6 +465,11 @@ static int sdl_host_service(SDLHost *h, CPU *c) {
             }
         }
     }
+    int input_suspended=h->paused || h->stopped || c->fault;
+#ifdef GENESIS_RINGS_SAVES
+    input_suspended|=h->settings.menu || (h->saves && h->saves->menu);
+#endif
+    c->pad_buttons[0]=sdl_pad_buttons(&h->input,input_suspended);
 #ifdef GENESIS_RINGS_SAVES
     if(h->saves) {
         uint64_t previous_notice=h->saves->notice_until;

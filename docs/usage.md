@@ -194,9 +194,11 @@ artifact, not a public release produced by this source repository.
 Mouse walking is directional, not arbitrary point-and-click pathfinding.
 Native automatic walking stops at intersections and interactive objects.
 Menus and fixed scenes do not receive outdoor mouse-walking requests.
-Physical gamepad mapping and remapping are not implemented; Control settings
-is a placeholder. **System → Help** toggles the on-screen controller hint,
-which defaults to off.
+SDL2 gamepads work in Classic and Enhanced. By default, D-pad/left stick move,
+and controller X/A/B are Genesis A/B/C. Back opens Settings; LB/RB open save/load.
+**Control settings** enables/disables gamepad input and selects one of two layouts.
+See [gamepad controls](gamepads.md) for mappings and hotplug behavior.
+**System → Help** toggles the on-screen controller hint, which defaults to off.
 
 ## Saves and Settings
 

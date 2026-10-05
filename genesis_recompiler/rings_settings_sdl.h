@@ -6,8 +6,8 @@ static void rings_settings_write(SDLHost *h) {
     RingsSettings *s=&h->settings;
     if(!s->path[0]) {snprintf(s->message,sizeof s->message,"Settings directory unavailable");return;}
     char data[256],temp[1280];
-    int n=snprintf(data,sizeof data,"GenesisRecomp Settings 1\nenhanced=%d\nwide=%d\nfullscreen=%d\nsmooth=%d\nzoom=%d\nmouse=%d\nhelp=%d\n",
-                   s->enhanced,s->wide,s->fullscreen,s->smooth,s->zoom,s->mouse,s->help);
+    int n=snprintf(data,sizeof data,"GenesisRecomp Settings 1\nenhanced=%d\nwide=%d\nfullscreen=%d\nsmooth=%d\nzoom=%d\nmouse=%d\nhelp=%d\ngamepad=%d\npad_layout=%d\n",
+                   s->enhanced,s->wide,s->fullscreen,s->smooth,s->zoom,s->mouse,s->help,h->input.enabled,h->input.layout);
 #ifdef _WIN32
     snprintf(temp,sizeof temp,"%s.tmp.%ld",s->path,(long)_getpid());
     wchar_t target[1280],temporary[1280];
@@ -47,7 +47,7 @@ static void rings_settings_apply(SDLHost *h,CPU *c) {
 #ifdef GENESIS_RINGS_MENU_FONT
     c->vdp.font_enabled=(uint8_t)(s->enhanced && h->font.path);
 #endif
-    rings_save_input_clear(c);h->fast_forward=0;h->last_frame=UINT64_MAX;
+    sdl_pad_clear(&h->input);rings_save_input_clear(c);h->fast_forward=0;h->last_frame=UINT64_MAX;
     if(c->vdp.rendered_frames)vdp_render(c);
     sdl_host_rebase(h,c);
 }
@@ -76,6 +76,8 @@ static void rings_settings_init(SDLHost *h,CPU *c,int wide,int zoom,int mouse,in
                     if(!strcmp(key,"zoom"))s->zoom=value;
                     if(!strcmp(key,"mouse"))s->mouse=value;
                     if(!strcmp(key,"help"))s->help=value;
+                    if(!strcmp(key,"gamepad"))h->input.enabled=value;
+                    if(!strcmp(key,"pad_layout"))h->input.layout=value;
                 }
             }
             fclose(f);
@@ -91,7 +93,7 @@ static void rings_settings_init(SDLHost *h,CPU *c,int wide,int zoom,int mouse,in
 }
 static void rings_settings_open(SDLHost *h,CPU *c) {
     RingsSettings *s=&h->settings;s->menu=1;s->selected=0;s->controls=0;s->message[0]=0;
-    rings_save_input_clear(c);h->fast_forward=0;
+    sdl_pad_clear(&h->input);rings_save_input_clear(c);h->fast_forward=0;
 #ifdef GENESIS_RINGS_WIDE
     rings_mouse_reset(&h->mouse);
 #endif
@@ -99,7 +101,7 @@ static void rings_settings_open(SDLHost *h,CPU *c) {
 }
 static void rings_settings_close(SDLHost *h,CPU *c) {
     h->settings.menu=0;h->settings.controls=0;
-    rings_save_input_clear(c);sdl_host_rebase(h,c);h->last_frame=UINT64_MAX;
+    sdl_pad_clear(&h->input);rings_save_input_clear(c);sdl_host_rebase(h,c);h->last_frame=UINT64_MAX;
 }
 static void rings_settings_observe(SDLHost *h,CPU *c) {
     RingsSettings *s=&h->settings;
@@ -146,20 +148,28 @@ static int rings_settings_event(SDLHost *h,CPU *c,const SDL_Event *e) {
     if(!s->menu)return 0;
     if(e->type==SDL_WINDOWEVENT)return 0;
     if(e->type==SDL_KEYDOWN && !e->key.repeat) {
-        SDL_Keycode key=e->key.keysym.sym;int rows=s->enhanced ? 9:3;
+        SDL_Keycode key=e->key.keysym.sym;int rows=s->enhanced ? 9:4;
         if(key==SDLK_ESCAPE) {
             if(s->controls)s->controls=0;else rings_settings_close(h,c);
         } else if(s->controls) {
-            if(key==SDLK_RETURN || key==SDLK_x || key==SDLK_z)s->controls=0;
+            if(key==SDLK_UP)s->control_selected=(s->control_selected+2)%3;
+            if(key==SDLK_DOWN)s->control_selected=(s->control_selected+1)%3;
+            if(key==SDLK_RETURN || key==SDLK_x || key==SDLK_z || key==SDLK_LEFT || key==SDLK_RIGHT) {
+                sdl_pad_clear(&h->input);
+                if(s->control_selected==0)h->input.enabled=!h->input.enabled;
+                else if(s->control_selected==1)h->input.layout=!h->input.layout;
+                else s->controls=0;
+                sdl_pad_clear(&h->input);rings_settings_write(h);
+            }
         } else {
             if(key==SDLK_UP)s->selected=(s->selected+rows-1)%rows;
             if(key==SDLK_DOWN)s->selected=(s->selected+1)%rows;
             if(key==SDLK_RETURN || key==SDLK_x || key==SDLK_z || key==SDLK_LEFT || key==SDLK_RIGHT) {
-                int back=s->enhanced ? 7:1;
+                int back=s->enhanced ? 7:2;
                 if(s->selected==back+1) {
                     SDL_Event quit;SDL_zero(quit);quit.type=SDL_QUIT;SDL_PushEvent(&quit);
                 } else if(s->selected==back)rings_settings_close(h,c);
-                else if(s->selected==6)s->controls=1;
+                else if(s->selected==(s->enhanced ? 6:1)) {s->controls=1;s->control_selected=0;}
                 else {
                     int *toggle=NULL;
                     switch(s->selected) {
@@ -273,7 +283,7 @@ static void rings_settings_overlay(SDLHost *h,const VDP *v) {
     SDL_RenderSetViewport(h->renderer,NULL);SDL_RenderSetClipRect(h->renderer,NULL);
     SDL_SetRenderDrawBlendMode(h->renderer,SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(h->renderer,0,0,0,150);SDL_RenderFillRect(h->renderer,NULL);
-    int rows=s->controls ? 3:s->enhanced ? 9:3;
+    int rows=s->controls ? 9:s->enhanced ? 9:4;
     int scale=width/300;if(height/210<scale)scale=height/210;if(scale<1)scale=1;
     int ph=(rows*16+58)*scale,pw=280*scale;
     SDL_Rect panel={(width-pw)/2,(height-ph)/2,pw,ph};
@@ -281,9 +291,25 @@ static void rings_settings_overlay(SDLHost *h,const VDP *v) {
     int x=panel.x+20*scale,y=panel.y+12*scale;
     rings_settings_label(h,x,y,scale,s->controls ? "Control settings":"Settings");y+=22*scale;
     if(s->controls) {
-        rings_settings_label(h,x,y,scale,"Coming later");
-        rings_settings_label(h,x,y+16*scale,scale,"Gamepads and key bindings");
-        rings_settings_label(h,x,y+32*scale,scale,"Back");
+        for(int i=0;i<3;++i,y+=16*scale) {
+            if(i==s->control_selected) {
+                SDL_Rect row={panel.x+16*scale,y-2*scale,panel.w-32*scale,14*scale};
+                SDL_SetRenderDrawColor(h->renderer,255,248,232,255);SDL_RenderFillRect(h->renderer,&row);
+            }
+            char label[64];
+            if(i==0)snprintf(label,sizeof label,"Gamepad: %s",h->input.enabled ? "On":"Off");
+            else if(i==1)snprintf(label,sizeof label,"Genesis A/B/C: %s",h->input.layout ? "A / B / X":"X / A / B");
+            else snprintf(label,sizeof label,"Back");
+            rings_settings_label(h,x,y,scale,label);
+        }
+        const char *device=h->input.controller ? SDL_GameControllerName(h->input.controller):NULL;
+        char label[64];snprintf(label,sizeof label,"Pad: %.25s",device ? device:"Not connected");
+        rings_settings_label(h,x,y+8*scale,scale,label);
+        rings_settings_label(h,x,y+24*scale,scale,"Move: D-pad / Left stick");
+        rings_settings_label(h,x,y+40*scale,scale,"Start: Start / Options / +");
+        rings_settings_label(h,x,y+56*scale,scale,"Settings: Back / Share / -");
+        rings_settings_label(h,x,y+72*scale,scale,"Save / Load: LB / RB");
+        rings_settings_label(h,x,y+88*scale,scale,"Menus: A/X pick - B back");
     } else for(int i=0;i<rows;++i,y+=16*scale) {
         if(i==s->selected) {
             SDL_Rect row={panel.x+16*scale,y-2*scale,panel.w-32*scale,14*scale};
@@ -292,9 +318,9 @@ static void rings_settings_overlay(SDLHost *h,const VDP *v) {
         char label[64];const char *names[5]={"Widescreen","Fullscreen","Smooth map","Zoom","Mouse controls"};
         int values[5]={s->wide,s->fullscreen,s->smooth,s->zoom,s->mouse};
         if(i==0)snprintf(label,sizeof label,"Mode: %s",s->enhanced ? "Enhanced":"Classic");
-        else if(i==(s->enhanced ? 8:2))snprintf(label,sizeof label,"Exit");
-        else if(i==(s->enhanced ? 7:1))snprintf(label,sizeof label,"Back");
-        else if(i==6)snprintf(label,sizeof label,"Control settings");
+        else if(i==(s->enhanced ? 8:3))snprintf(label,sizeof label,"Exit");
+        else if(i==(s->enhanced ? 7:2))snprintf(label,sizeof label,"Back");
+        else if(i==(s->enhanced ? 6:1))snprintf(label,sizeof label,"Control settings");
         else snprintf(label,sizeof label,"%s: %s",names[i-1],values[i-1] ? "On":"Off");
         rings_settings_label(h,x,y,scale,label);
     }
