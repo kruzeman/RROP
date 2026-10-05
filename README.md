@@ -1,6 +1,6 @@
 # RROP — Rings of Power Recompiled
 
-[Русская версия](README.ru.md) · [Build and play](docs/usage.md) · [Settings](docs/settings.md)
+[Русская версия](README.ru.md) · [Build and play](docs/usage.md) · [Settings](docs/settings.md) · [Gamepads](docs/gamepads.md)
 
 [![Support RROP on Ko-fi](https://storage.ko-fi.com/cdn/kofi2.png)](https://ko-fi.com/O6R42871XC)
 
@@ -17,7 +17,7 @@ The project focuses on one verified game revision, with optional improvements:
 - Viewport zoom from 50% to 100% and smooth outdoor camera scrolling.
 - Live replacement of the game's text with an external TTF/OTF font.
 - Mouse movement and the game's native automatic walking.
-- SDL2 gamepads, hotplug, presets and custom A/B/C/START buttons.
+- SDL2 gamepads with hotplug, presets and persistent A/B/C/START button assignments.
 - YM2612/PSG sound, Linux builds and Windows x64 packaging.
 - Five manual saves and five rotating autosaves, every five minutes of active play.
 - In-game Settings and save menus styled using the game's parchment.
@@ -69,10 +69,22 @@ python3 examples/build_rings_of_power.py 'roms/Rings of Power (UE) [!].gen' \
 ```
 
 Use **F10**, **Esc**, or **System → Settings** to change features; choose **Exit**
-there to quit. Arrow keys move; **Z/X/C** are Genesis **A/B/C**.
-Gamepads work in both modes; see [gamepad controls](docs/gamepads.md).
+there to quit. Arrow keys move; **Z/X/C** are Genesis **A/B/C**, and **Enter** is Start.
 See the [manual](docs/usage.md) for Windows, other Linux distributions,
 controls, saves and troubleshooting.
+
+## Gamepad controls
+
+Controller input is enabled by default in both Classic and Enhanced. Connect an
+SDL2-compatible gamepad before launch or during play; no extra build flags are
+needed. The D-pad or left stick moves, **X/A/B** map to Genesis **A/B/C**, and
+**Start** maps to Genesis Start. **Back/Select** opens Settings.
+
+To choose your own buttons, open **Settings → Control settings → Assign buttons:
+A / B / C / START**. Press and release the desired controller button for each
+action in order. The completed layout is saved automatically for future launches;
+**Reset buttons** restores the default. See the [gamepad guide](docs/gamepads.md)
+for other shortcuts, presets and troubleshooting.
 
 ## Game data and compatibility
 
