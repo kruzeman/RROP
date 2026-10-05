@@ -90,23 +90,28 @@ static int rings_wide_replay(CPU *source,unsigned grid) {
     w->tracking_hero=0;w->work_focus_x=184;w->work_focus_y=RINGS_SCENE_TOP+96;
     unsigned steps=0,budget=grid==80 ? 12500000:2000000;uint64_t submissions=0;
     while(!c->fault && steps++<budget && c->pc!=0x1b9e8 && c->pc!=0x1b94c) {
-        if(c->pc==0x231d8 || (grid==10 && c->pc==0x2343a)) {
+        if(c->pc==0x231d8 || c->pc==0x2343a) {
             w->tracking_hero=(read_mem(c,c->a[7]+4,4)&0xffffff)==0xffb0cc;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
             int hx=(int16_t)read_mem(c,c->a[7]+8,2),hy=(int16_t)read_mem(c,c->a[7]+10,2);
             /* Expanded traversal can encounter wrapped copies of the hero.
                Only the instance near the original viewport is interpolated. */
             w->primary_hero=(uint8_t)(w->tracking_hero && hx>=112 && hx<=256 && hy>=16 && hy<=128);
+            int ground=hy+(int16_t)read_mem(c,c->a[7]+12,2)+20;
+            /* Both exploration writers occur outdoors as well as indoors.
+               Track the tile ground before pose offsets or optional shadows. */
             if(grid==10 && w->tracking_hero) {
-                /* Indoor party poses use $02343A, without the outdoor shadow
-                   resource. Track the tile ground, independent of the pose. */
                 w->native_work.hero_x=(int16_t)hx;
-                w->native_work.hero_y=(int16_t)(hy+(int16_t)read_mem(c,c->a[7]+12,2)+20);
+                w->native_work.hero_y=(int16_t)ground;
                 w->native_work.hero_valid=1;
+            } else if(grid>=32 && w->primary_hero) {
+                w->hero_work.hero_x=(int16_t)hx;
+                w->hero_work.hero_y=(int16_t)ground;
+                w->hero_work.hero_valid=1;
             }
 #endif
         }
-        if(c->pc==0x232aa || (grid==10 && c->pc==0x23626))w->tracking_hero=0;
+        if(c->pc==0x232aa || c->pc==0x23626)w->tracking_hero=0;
         if((grid==10 || grid>=32) && c->pc==0x1baea)
             w->tile_ground_y=(int16_t)read_mem(c,c->a[6]-12,2);
         if(c->pc==0x1386a) {
@@ -150,10 +155,6 @@ static int rings_wide_replay(CPU *source,unsigned grid) {
                         d->actor=w->resource_actor;
                         d->ground=(int16_t)(w->resource_ground-(d->actor ? top:0));
                     } else m->overflow=1;
-                }
-                if(w->primary_hero && w->tracking_hero && id==0x209 && !flipped &&
-                   x>=144 && x<=248 && y>=35 && y<=115) {
-                    m->hero_x=(int16_t)(x&~1);m->hero_y=(int16_t)y;m->hero_valid=1;
                 }
             }
 #endif

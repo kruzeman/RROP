@@ -13,6 +13,11 @@ inside native scenes, including the shadow when the game draws one. A completed 
 collisions, interactions or CPU timing. Releasing input can still leave the
 current visual transition to finish. It does not request additional steps.
 
+Outdoor tracking now covers both exploration pose writers, using the tile ground
+under the hero instead of requiring a shadow sprite. Changing pose on the same
+tile does not start another movement; a scrolling camera and the hero share the
+same transition in both classic and widescreen layouts, at every zoom level.
+
 Use `--smooth-camera --camera-smooth-ms 120` for a shorter transition, or turn
 Smooth map off for the original presentation. Pause and host menus freeze the
 transition. Loading a slot, changing scenes, disabling smoothing and large
@@ -34,6 +39,8 @@ The original animation poses
 are retained; this does not generate additional walk animation frames.
 
 Regression tests cover indoor camera coordinates, indoor party poses without an
-outdoor shadow, elevated object ownership, SDL presentation and combat parity
-with smoothing disabled. A local verified-ROM probe also checks indoor hero
-transitions and the original bitmap; these checks do not replace full playtesting.
+outdoor shadow, both outdoor pose writers, centered-camera compensation at
+50–100% zoom, settled outdoor bitmap parity, elevated object ownership, SDL
+presentation and combat parity with smoothing disabled. A local verified-ROM
+probe checks indoor and outdoor hero transitions and the original bitmap; these
+checks do not replace full playtesting.

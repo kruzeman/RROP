@@ -23,11 +23,14 @@ def motion_source():
     code = bytes.fromhex('4e56 0000 4267 3f2e 000e 3f2e 000c 3f3c 0000 '
                          '4eb9 0000e358 508f 4ef9 00023624')
     rom[0x2343a:0x2343a + len(code)] = code
+    outdoor_code = code[:-4] + bytes.fromhex('000232a8')
+    rom[0x231d8:0x231d8 + len(outdoor_code)] = outdoor_code
+    rom[0x232a8:0x232ac] = bytes.fromhex('4e5e 4e75')
     rom[0x23624:0x23628] = bytes.fromhex('4e5e 4e75')
     rom[0xe358:0xe35a] = bytes.fromhex('4e75')
     source = ('#define GENESIS_NO_MAIN\n#define GENESIS_RINGS_WIDE\n'
               '#define GENESIS_RINGS_SMOOTH_CAMERA\n#define GENESIS_RINGS_SAVES\n'
-              + emit(analyze(bytes(rom), [0x200, 0x2343a])))
+              + emit(analyze(bytes(rom), [0x200, 0x231d8, 0x2343a])))
     source += '\n' + (Path(__file__).resolve().parents[1] / 'genesis_recompiler/rings_camera.h').read_text()
     source += '\n#include <assert.h>\n' + ZOOM_SCENE + CONTEXT + r'''
 static void native_scene(CPU *c,RingsWide *w) {
@@ -86,6 +89,64 @@ assert(w->native_work.count==1 && w->native_work.draw[0].hero && w->native_work.
 assert(w->native_work.hero_x==208 && w->native_work.hero_y==93);
 write_mem(c,c->a[7]+4,4,0xffb0d8);memset(&w->native_work,0,sizeof w->native_work);
 assert(rings_wide_replay(c,10));assert(!w->native_work.hero_valid && !w->native_work.draw[0].hero);
+''')
+
+    def test_outdoor_writers_capture_hero_without_shadow_in_both_layouts(self):
+        self.check(r'''
+context(c,0xb08c,1,1);c->sr=0x2700;c->a[7]=0xfff000;
+write_mem(c,c->a[7],4,0x1b9e8);write_mem(c,c->a[7]+4,4,0xffb0cc);
+write_mem(c,c->a[7]+8,2,210);write_mem(c,c->a[7]+10,2,106);write_mem(c,c->a[7]+12,2,-28);
+uint8_t ram[65536];memcpy(ram,c->ram,sizeof ram);uint64_t clocks=c->master_cycles;
+for(unsigned grid=32;grid<=80;grid+=48)for(unsigned writer=0;writer<2;++writer) {
+ c->pc=writer ? 0x2343a:0x231d8;assert(rings_wide_replay(c,grid));
+ RingsHeroPatch *m=&w->hero_work;assert(m->valid && m->hero_valid && m->count==1);
+ assert(m->hero_x==210 && m->hero_y==98 && m->draw[0].hero && m->draw[0].id==0);
+ assert(!memcmp(ram,c->ram,sizeof ram) && c->master_cycles==clocks);
+ c->vdp.hero_patch=*m;
+ uint8_t *pixels=malloc(RINGS_HERO_WIDTH*RINGS_HERO_HEIGHT),*lift=malloc(RINGS_HERO_WIDTH*RINGS_HERO_HEIGHT);
+ assert(pixels&&lift);assert(rings_hero_pixels(c,&c->vdp,0,0,pixels,lift));
+ unsigned left=RINGS_ZOOM_LEFT+40+RINGS_HERO_LEFT,top=RINGS_ZOOM_TOP+RINGS_HERO_TOP;
+ /* A settled patch must exactly reproduce the original expanded bitmap. */
+ for(unsigned y=0;y<RINGS_HERO_HEIGHT;++y)
+  assert(!memcmp(pixels+y*RINGS_HERO_WIDTH,w->zoom_work+(top+y)*RINGS_ZOOM_WIDTH+left,RINGS_HERO_WIDTH));
+ unsigned old=(106-RINGS_HERO_TOP)*RINGS_HERO_WIDTH+210-64-RINGS_HERO_LEFT;
+ assert(pixels[old]==2);assert(rings_hero_pixels(c,&c->vdp,-14,8,pixels,lift));
+ assert(!pixels[old] && pixels[old+8*RINGS_HERO_WIDTH-14]==2);
+ free(pixels);free(lift);
+ /* Neither other actors nor wrapped instances are assigned hero motion. */
+ write_mem(c,c->a[7]+4,4,0xffb0d8);assert(rings_wide_replay(c,grid));
+ assert(!m->valid && !m->hero_valid && !m->draw[0].hero);
+ write_mem(c,c->a[7]+4,4,0xffb0cc);write_mem(c,c->a[7]+8,2,350);
+ assert(rings_wide_replay(c,grid));assert(!m->valid && !m->hero_valid && !m->draw[0].hero);
+ write_mem(c,c->a[7]+8,2,210);
+}
+''')
+
+    def test_outdoor_hero_cancels_camera_pan_and_settles_at_all_zoom_levels(self):
+        self.check(r'''
+VDP *v=&c->vdp;v->native_scene=0;v->zoom_world_visible=1;
+v->camera.valid=1;v->camera.identity=42;v->hero_patch.valid=v->hero_patch.hero_valid=1;
+v->hero_patch.hero_x=210;v->hero_patch.hero_y=98;
+v->zoom_focus_x=480;v->zoom_focus_y=356;
+for(unsigned wide=0;wide<2;++wide)for(unsigned percent=50;percent<=100;percent+=10) {
+ v->wide_enabled=(uint8_t)wide;v->camera.generation=1;v->camera.x=v->camera.y=0;
+ RingsCameraTween t={0};t.enabled=1;
+ rings_camera_update(&t,v,1000,1000,percent);assert(t.hero_ready && !t.native);
+ v->camera.generation++;v->camera.x=14;v->camera.y=-8;
+ rings_camera_update(&t,v,1100,1000,percent);
+ assert(t.active && t.hero_active && t.hero_x==-14 && t.hero_y==8);
+ double zoom=percent/100.0;
+ assert(rings_camera_abs(t.x+t.hero_x*zoom)<0.000001);
+ assert(rings_camera_abs(t.y+t.hero_y*zoom)<0.000001);
+ rings_camera_update(&t,v,1200,1000,percent);assert(t.hero_x==-7 && t.hero_y==4);
+ double x=t.hero_x,y=t.hero_y;rings_camera_update(&t,v,1200,1000,percent);
+ assert(t.hero_x==x && t.hero_y==y); /* A paused clock freezes both transitions. */
+ rings_camera_update(&t,v,1300,1000,percent);assert(!t.hero_active && !t.active && !t.hero_x && !t.hero_y);
+ /* A pose update on the same tile must not start another walk. */
+ v->camera.generation++;rings_camera_update(&t,v,1400,1000,percent);assert(!t.hero_active);
+ v->camera.generation++;v->camera.identity++;
+ rings_camera_update(&t,v,1500,1000,percent);assert(!t.hero_active && !t.active);
+}
 ''')
 
     def test_native_elevation_spills_over_frame_and_moves_with_actor_not_wall(self):
