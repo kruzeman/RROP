@@ -378,6 +378,10 @@ static int sdl_host_service(SDLHost *h, CPU *c) {
         int input_menu=0;
 #ifdef GENESIS_RINGS_SAVES
         input_menu=h->settings.menu || (h->saves && h->saves->menu);
+        int remapping=h->settings.remap;
+        int assigned=rings_settings_remap_event(h,c,&event);
+        if(remapping!=h->settings.remap)redraw=1;
+        if(assigned) {redraw=1;continue;}
 #endif
         if(sdl_pad_event(&h->input,&event,input_menu))continue;
         if(event.type==SDL_KEYUP)h->input.keyboard&=(uint8_t)~sdl_pad_key(event.key.keysym.sym);

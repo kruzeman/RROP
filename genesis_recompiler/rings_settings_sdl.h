@@ -5,9 +5,11 @@
 static void rings_settings_write(SDLHost *h) {
     RingsSettings *s=&h->settings;
     if(!s->path[0]) {snprintf(s->message,sizeof s->message,"Settings directory unavailable");return;}
-    char data[256],temp[1280];
-    int n=snprintf(data,sizeof data,"GenesisRecomp Settings 1\nenhanced=%d\nwide=%d\nfullscreen=%d\nsmooth=%d\nzoom=%d\nmouse=%d\nhelp=%d\ngamepad=%d\npad_layout=%d\n",
-                   s->enhanced,s->wide,s->fullscreen,s->smooth,s->zoom,s->mouse,s->help,h->input.enabled,h->input.layout);
+    char data[512],temp[1280];
+    int n=snprintf(data,sizeof data,"GenesisRecomp Settings 1\nenhanced=%d\nwide=%d\nfullscreen=%d\nsmooth=%d\nzoom=%d\nmouse=%d\nhelp=%d\ngamepad=%d\npad_layout=%d\npad_custom=%d\npad_a=%u\npad_b=%u\npad_c=%u\npad_start=%u\n",
+                   s->enhanced,s->wide,s->fullscreen,s->smooth,s->zoom,s->mouse,s->help,h->input.enabled,h->input.layout,
+                   h->input.custom,sdl_pad_binding(&h->input,0),sdl_pad_binding(&h->input,1),
+                   sdl_pad_binding(&h->input,2),sdl_pad_binding(&h->input,3));
 #ifdef _WIN32
     snprintf(temp,sizeof temp,"%s.tmp.%ld",s->path,(long)_getpid());
     wchar_t target[1280],temporary[1280];
@@ -61,14 +63,24 @@ static void rings_settings_init(SDLHost *h,CPU *c,int wide,int zoom,int mouse,in
     s->wide=s->enhanced ? wide:1;s->zoom=s->enhanced ? zoom:1;
     s->mouse=s->enhanced ? mouse:1;s->smooth=s->enhanced ? smooth:1;
     if(h->saves && h->saves->enabled) {
-        snprintf(s->path,sizeof s->path,"%s/settings.cfg",h->saves->directory);
-        FILE *f=rings_save_read_file(s->path);
+        size_t directory_size=strlen(h->saves->directory);
+        if(directory_size<=sizeof s->path-sizeof "/settings.cfg") {
+            memcpy(s->path,h->saves->directory,directory_size);
+            memcpy(s->path+directory_size,"/settings.cfg",sizeof "/settings.cfg");
+        } else {s->path[0]=0;snprintf(s->message,sizeof s->message,"Settings directory path is too long");}
+        FILE *f=s->path[0] ? rings_save_read_file(s->path):NULL;
         if(f) {
-            char line[128];
+            char line[128];uint8_t binding[4]={0};unsigned seen=0;int custom=0;
             if(fgets(line,sizeof line,f) && !strcmp(line,"GenesisRecomp Settings 1\n")) {
                 while(fgets(line,sizeof line,f)) {
                     char key[32],tail;int value;
-                    if(sscanf(line,"%31[^=]=%d %c",key,&value,&tail)!=2 || (value!=0 && value!=1))continue;
+                    if(sscanf(line,"%31[^=]=%d %c",key,&value,&tail)!=2)continue;
+                    const char *keys[4]={"pad_a","pad_b","pad_c","pad_start"};
+                    for(unsigned i=0;i<4;++i)if(!strcmp(key,keys[i])) {
+                        seen|=1u<<i;binding[i]=(uint8_t)(value>=0 && value<SDL_CONTROLLER_BUTTON_MAX ? value:255);
+                    }
+                    if(value!=0 && value!=1)continue;
+                    if(!strcmp(key,"pad_custom"))custom=value;
                     if(!strcmp(key,"enhanced"))s->enhanced=value;
                     if(!strcmp(key,"wide"))s->wide=value;
                     if(!strcmp(key,"fullscreen"))s->fullscreen=value;
@@ -79,6 +91,8 @@ static void rings_settings_init(SDLHost *h,CPU *c,int wide,int zoom,int mouse,in
                     if(!strcmp(key,"gamepad"))h->input.enabled=value;
                     if(!strcmp(key,"pad_layout"))h->input.layout=value;
                 }
+                h->input.custom=custom && seen==15 && sdl_pad_bindings_valid(binding);
+                if(h->input.custom)memcpy(h->input.binding,binding,sizeof binding);
             }
             fclose(f);
         }
@@ -92,7 +106,7 @@ static void rings_settings_init(SDLHost *h,CPU *c,int wide,int zoom,int mouse,in
     rings_settings_apply(h,c);
 }
 static void rings_settings_open(SDLHost *h,CPU *c) {
-    RingsSettings *s=&h->settings;s->menu=1;s->selected=0;s->controls=0;s->message[0]=0;
+    RingsSettings *s=&h->settings;s->menu=1;s->selected=0;s->controls=0;s->remap=0;s->message[0]=0;
     sdl_pad_clear(&h->input);rings_save_input_clear(c);h->fast_forward=0;
 #ifdef GENESIS_RINGS_WIDE
     rings_mouse_reset(&h->mouse);
@@ -100,7 +114,7 @@ static void rings_settings_open(SDLHost *h,CPU *c) {
     h->next_service=c->master_cycles;h->last_frame=UINT64_MAX;sdl_host_rebase(h,c);
 }
 static void rings_settings_close(SDLHost *h,CPU *c) {
-    h->settings.menu=0;h->settings.controls=0;
+    h->settings.menu=0;h->settings.controls=0;h->settings.remap=0;
     sdl_pad_clear(&h->input);rings_save_input_clear(c);sdl_host_rebase(h,c);h->last_frame=UINT64_MAX;
 }
 static void rings_settings_observe(SDLHost *h,CPU *c) {
@@ -139,6 +153,57 @@ static void rings_settings_observe(SDLHost *h,CPU *c) {
         c->ram[0xbb6c]=0;c->pc=0x20758;rings_settings_open(h,c);
     }
 }
+static void rings_settings_remap_start(SDLHost *h) {
+    RingsSettings *s=&h->settings;
+    if(!h->input.controller || !SDL_GameControllerGetAttached(h->input.controller)) {
+        snprintf(s->message,sizeof s->message,"Connect a gamepad first");return;
+    }
+    s->remap=1;s->remap_held=0;s->message[0]=0;
+    for(unsigned i=0;i<SDL_CONTROLLER_BUTTON_MAX && i<32;++i)
+        if(SDL_GameControllerGetButton(h->input.controller,(SDL_GameControllerButton)i))s->remap_held|=UINT32_C(1)<<i;
+    sdl_pad_clear(&h->input);
+}
+/* Consume raw buttons before host-menu key translation: B must be assignable
+   here rather than interpreted as Escape. Commit all four bindings together. */
+static int rings_settings_remap_event(SDLHost *h,CPU *c,const SDL_Event *e) {
+    RingsSettings *s=&h->settings;if(!s->menu || !s->remap)return 0;
+    if(((e->type==SDL_CONTROLLERDEVICEREMOVED || e->type==SDL_CONTROLLERDEVICEREMAPPED) &&
+        e->cdevice.which==h->input.instance) ||
+       (e->type==SDL_WINDOWEVENT && e->window.event==SDL_WINDOWEVENT_FOCUS_LOST)) {
+        s->remap=0;snprintf(s->message,sizeof s->message,"Button assignment cancelled");return 0;
+    }
+    if(e->type==SDL_KEYDOWN && !e->key.repeat &&
+       (e->key.keysym.sym==SDLK_ESCAPE || e->key.keysym.sym==SDLK_F10)) {
+        s->remap=0;s->message[0]=0;
+        return e->key.keysym.sym==SDLK_ESCAPE;
+    }
+    if(e->type==SDL_CONTROLLERBUTTONDOWN || e->type==SDL_CONTROLLERBUTTONUP) {
+        if(e->cbutton.which!=h->input.instance || !h->input.focused)return 1;
+        unsigned b=e->cbutton.button;if(b>=SDL_CONTROLLER_BUTTON_MAX || b>=32)return 1;
+        uint32_t bit=UINT32_C(1)<<b;
+        if(e->type==SDL_CONTROLLERBUTTONUP) {s->remap_held&=~bit;return 1;}
+        if(b==SDL_CONTROLLER_BUTTON_BACK) {s->remap=0;s->message[0]=0;sdl_pad_clear(&h->input);return 1;}
+        if(s->remap_held) {s->remap_held|=bit;return 1;}
+        s->remap_held|=bit;
+        if(!sdl_pad_bindable(b)) {
+            snprintf(s->message,sizeof s->message,"This button is reserved for movement or menus");return 1;
+        }
+        unsigned step=(unsigned)s->remap-1;
+        for(unsigned i=0;i<step;++i)if(s->remap_binding[i]==b) {
+            snprintf(s->message,sizeof s->message,"Already assigned - choose another button");return 1;
+        }
+        s->remap_binding[step]=(uint8_t)b;s->message[0]=0;
+        if(++s->remap==5) {
+            memcpy(h->input.binding,s->remap_binding,sizeof h->input.binding);h->input.custom=1;
+            s->remap=0;sdl_pad_clear(&h->input);rings_save_input_clear(c);
+            rings_settings_write(h);
+            if(!s->message[0])snprintf(s->message,sizeof s->message,"Gamepad buttons saved");
+        }
+        return 1;
+    }
+    if(e->type==SDL_CONTROLLERAXISMOTION || e->type==SDL_KEYDOWN || e->type==SDL_KEYUP)return 1;
+    return 0;
+}
 static int rings_settings_event(SDLHost *h,CPU *c,const SDL_Event *e) {
     RingsSettings *s=&h->settings;if(!s->ready)return 0;
     if(e->type==SDL_KEYDOWN && !e->key.repeat && e->key.keysym.sym==SDLK_F10 &&
@@ -152,12 +217,14 @@ static int rings_settings_event(SDLHost *h,CPU *c,const SDL_Event *e) {
         if(key==SDLK_ESCAPE) {
             if(s->controls)s->controls=0;else rings_settings_close(h,c);
         } else if(s->controls) {
-            if(key==SDLK_UP)s->control_selected=(s->control_selected+2)%3;
-            if(key==SDLK_DOWN)s->control_selected=(s->control_selected+1)%3;
+            if(key==SDLK_UP)s->control_selected=(s->control_selected+4)%5;
+            if(key==SDLK_DOWN)s->control_selected=(s->control_selected+1)%5;
             if(key==SDLK_RETURN || key==SDLK_x || key==SDLK_z || key==SDLK_LEFT || key==SDLK_RIGHT) {
                 sdl_pad_clear(&h->input);
                 if(s->control_selected==0)h->input.enabled=!h->input.enabled;
-                else if(s->control_selected==1)h->input.layout=!h->input.layout;
+                else if(s->control_selected==1) {h->input.layout=!h->input.layout;h->input.custom=0;}
+                else if(s->control_selected==2) {rings_settings_remap_start(h);return 1;}
+                else if(s->control_selected==3) {h->input.layout=0;h->input.custom=0;s->message[0]=0;}
                 else s->controls=0;
                 sdl_pad_clear(&h->input);rings_settings_write(h);
             }
@@ -283,22 +350,38 @@ static void rings_settings_overlay(SDLHost *h,const VDP *v) {
     SDL_RenderSetViewport(h->renderer,NULL);SDL_RenderSetClipRect(h->renderer,NULL);
     SDL_SetRenderDrawBlendMode(h->renderer,SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(h->renderer,0,0,0,150);SDL_RenderFillRect(h->renderer,NULL);
-    int rows=s->controls ? 9:s->enhanced ? 9:4;
-    int scale=width/300;if(height/210<scale)scale=height/210;if(scale<1)scale=1;
+    int rows=s->remap ? 6:s->controls ? 11:s->enhanced ? 9:4;
+    int native_height=rows*16+58;
+    int scale=width/300;if(height/native_height<scale)scale=height/native_height;if(scale<1)scale=1;
     int ph=(rows*16+58)*scale,pw=280*scale;
     SDL_Rect panel={(width-pw)/2,(height-ph)/2,pw,ph};
     rings_settings_panel(h,panel,scale);
     int x=panel.x+20*scale,y=panel.y+12*scale;
-    rings_settings_label(h,x,y,scale,s->controls ? "Control settings":"Settings");y+=22*scale;
-    if(s->controls) {
-        for(int i=0;i<3;++i,y+=16*scale) {
+    rings_settings_label(h,x,y,scale,s->remap ? "Assign gamepad buttons":s->controls ? "Control settings":"Settings");y+=22*scale;
+    if(s->remap) {
+        const char *names[4]={"A","B","C","START"};
+        for(unsigned i=0;i<4;++i,y+=16*scale) {
+            char label[64];
+            if((int)i==s->remap-1) {
+                SDL_Rect row={panel.x+16*scale,y-2*scale,panel.w-32*scale,14*scale};
+                SDL_SetRenderDrawColor(h->renderer,255,248,232,255);SDL_RenderFillRect(h->renderer,&row);
+                snprintf(label,sizeof label,"Press button for Genesis %s",names[i]);
+            } else if((int)i<s->remap-1)snprintf(label,sizeof label,"Genesis %s: %s",names[i],sdl_pad_label(s->remap_binding[i]));
+            else snprintf(label,sizeof label,"Genesis %s: ...",names[i]);
+            rings_settings_label(h,x,y,scale,label);
+        }
+        rings_settings_label(h,x,y+8*scale,scale,s->remap_held ? "Release held buttons to continue":"Choose a button on your gamepad");
+    } else if(s->controls) {
+        for(int i=0;i<5;++i,y+=16*scale) {
             if(i==s->control_selected) {
                 SDL_Rect row={panel.x+16*scale,y-2*scale,panel.w-32*scale,14*scale};
                 SDL_SetRenderDrawColor(h->renderer,255,248,232,255);SDL_RenderFillRect(h->renderer,&row);
             }
             char label[64];
             if(i==0)snprintf(label,sizeof label,"Gamepad: %s",h->input.enabled ? "On":"Off");
-            else if(i==1)snprintf(label,sizeof label,"Genesis A/B/C: %s",h->input.layout ? "A / B / X":"X / A / B");
+            else if(i==1)snprintf(label,sizeof label,"Layout: %s",h->input.custom ? "Custom":h->input.layout ? "A / B / X":"X / A / B");
+            else if(i==2)snprintf(label,sizeof label,"Assign buttons: A / B / C / START");
+            else if(i==3)snprintf(label,sizeof label,"Reset buttons");
             else snprintf(label,sizeof label,"Back");
             rings_settings_label(h,x,y,scale,label);
         }
@@ -306,10 +389,13 @@ static void rings_settings_overlay(SDLHost *h,const VDP *v) {
         char label[64];snprintf(label,sizeof label,"Pad: %.25s",device ? device:"Not connected");
         rings_settings_label(h,x,y+8*scale,scale,label);
         rings_settings_label(h,x,y+24*scale,scale,"Move: D-pad / Left stick");
-        rings_settings_label(h,x,y+40*scale,scale,"Start: Start / Options / +");
-        rings_settings_label(h,x,y+56*scale,scale,"Settings: Back / Share / -");
-        rings_settings_label(h,x,y+72*scale,scale,"Save / Load: LB / RB");
-        rings_settings_label(h,x,y+88*scale,scale,"Menus: A/X pick - B back");
+        snprintf(label,sizeof label,"A/B/C: %s / %s / %s",sdl_pad_label(sdl_pad_binding(&h->input,0)),
+                 sdl_pad_label(sdl_pad_binding(&h->input,1)),sdl_pad_label(sdl_pad_binding(&h->input,2)));
+        rings_settings_label(h,x,y+40*scale,scale,label);
+        snprintf(label,sizeof label,"START: %s",sdl_pad_label(sdl_pad_binding(&h->input,3)));
+        rings_settings_label(h,x,y+56*scale,scale,label);
+        rings_settings_label(h,x,y+72*scale,scale,"Settings: Back / Share / -");
+        rings_settings_label(h,x,y+88*scale,scale,"Save / Load: LB / RB");
     } else for(int i=0;i<rows;++i,y+=16*scale) {
         if(i==s->selected) {
             SDL_Rect row={panel.x+16*scale,y-2*scale,panel.w-32*scale,14*scale};
@@ -325,7 +411,7 @@ static void rings_settings_overlay(SDLHost *h,const VDP *v) {
         rings_settings_label(h,x,y,scale,label);
     }
     y=panel.y+ph-21*scale;
-    rings_settings_label(h,x,y,scale,"Arrows / Enter - Esc: Back");
+    rings_settings_label(h,x,y,scale,s->remap ? "Esc / Back: Cancel":"Arrows / Enter - Esc: Back");
     if(s->message[0])rings_settings_label(h,panel.x, panel.y+ph+3*scale,scale,s->message);
     SDL_SetRenderDrawBlendMode(h->renderer,SDL_BLENDMODE_NONE);SDL_SetRenderDrawColor(h->renderer,0,0,0,255);
 }

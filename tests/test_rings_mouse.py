@@ -115,7 +115,11 @@ for(unsigned mode=0;mode<6;++mode) {
  point(&h,SDL_MOUSEBUTTONDOWN,SDL_BUTTON_RIGHT,260,50);
  point(&h,SDL_MOUSEBUTTONUP,SDL_BUTTON_RIGHT,260,50);assert(sdl_host_service(&h,c));assert(h.mouse.pending);
  if(mode==0) {h.paused=1;rings_mouse_update(&h,c);h.paused=0;}
- if(mode==1) {SDL_Event e={0};e.type=SDL_WINDOWEVENT;e.window.event=SDL_WINDOWEVENT_FOCUS_LOST;SDL_PushEvent(&e);assert(sdl_host_service(&h,c));}
+ if(mode==1) {
+  SDL_Event e={0};e.type=SDL_WINDOWEVENT;e.window.event=SDL_WINDOWEVENT_FOCUS_LOST;
+  SDL_PushEvent(&e);assert(sdl_host_service(&h,c));
+  e.window.event=SDL_WINDOWEVENT_FOCUS_GAINED;SDL_PushEvent(&e);assert(sdl_host_service(&h,c));
+ }
  if(mode==2) {RingsSaves saves={0};saves.menu=1;h.saves=&saves;rings_mouse_update(&h,c);h.saves=NULL;}
  if(mode==3) {c->ram[0x111]=1;rings_mouse_update(&h,c);c->ram[0x111]=0;}
  if(mode==4) {RingsSaves saves={0};h.saves=&saves;rings_save_host_loaded(&h,c);h.saves=NULL;}

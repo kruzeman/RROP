@@ -6,7 +6,44 @@ typedef struct {
     SDL_JoystickID instance;
     uint8_t keyboard,blocked;
     int focused,enabled,layout,stick_x,stick_y;
+    int custom;
+    uint8_t binding[4];
 } SDLPadInput;
+static int sdl_pad_bindable(unsigned button) {
+    return button<SDL_CONTROLLER_BUTTON_MAX && button!=SDL_CONTROLLER_BUTTON_BACK &&
+           button!=SDL_CONTROLLER_BUTTON_GUIDE && button!=SDL_CONTROLLER_BUTTON_LEFTSHOULDER &&
+           button!=SDL_CONTROLLER_BUTTON_RIGHTSHOULDER &&
+           !(button>=SDL_CONTROLLER_BUTTON_DPAD_UP && button<=SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+}
+static int sdl_pad_bindings_valid(const uint8_t *binding) {
+    for(unsigned i=0;i<4;++i) {
+        if(!sdl_pad_bindable(binding[i]))return 0;
+        for(unsigned j=0;j<i;++j)if(binding[i]==binding[j])return 0;
+    }
+    return 1;
+}
+static unsigned sdl_pad_binding(const SDLPadInput *p,unsigned action) {
+    const uint8_t presets[2][4]={
+        {SDL_CONTROLLER_BUTTON_X,SDL_CONTROLLER_BUTTON_A,SDL_CONTROLLER_BUTTON_B,SDL_CONTROLLER_BUTTON_START},
+        {SDL_CONTROLLER_BUTTON_A,SDL_CONTROLLER_BUTTON_B,SDL_CONTROLLER_BUTTON_X,SDL_CONTROLLER_BUTTON_START}
+    };
+    return p->custom ? p->binding[action]:presets[p->layout!=0][action];
+}
+static const char *sdl_pad_label(unsigned button) {
+    switch(button) {
+        case SDL_CONTROLLER_BUTTON_A:return "A";
+        case SDL_CONTROLLER_BUTTON_B:return "B";
+        case SDL_CONTROLLER_BUTTON_X:return "X";
+        case SDL_CONTROLLER_BUTTON_Y:return "Y";
+        case SDL_CONTROLLER_BUTTON_START:return "Start";
+        case SDL_CONTROLLER_BUTTON_LEFTSTICK:return "L3";
+        case SDL_CONTROLLER_BUTTON_RIGHTSTICK:return "R3";
+        default: {
+            const char *name=SDL_GameControllerGetStringForButton((SDL_GameControllerButton)button);
+            return name ? name:"Unknown";
+        }
+    }
+}
 static int sdl_pad_axis(int value,int previous) {
     if(value<=-10000)return -1;
     if(value>=10000)return 1;
@@ -17,13 +54,9 @@ static int sdl_pad_axis(int value,int previous) {
 static uint8_t sdl_pad_physical(SDLPadInput *p) {
     if(!p->controller || !SDL_GameControllerGetAttached(p->controller))return 0;
     uint8_t buttons=0;
-    const SDL_GameControllerButton face[2][3]={
-        {SDL_CONTROLLER_BUTTON_X,SDL_CONTROLLER_BUTTON_A,SDL_CONTROLLER_BUTTON_B},
-        {SDL_CONTROLLER_BUTTON_A,SDL_CONTROLLER_BUTTON_B,SDL_CONTROLLER_BUTTON_X}
-    };
-    for(unsigned i=0;i<3;++i)
-        if(SDL_GameControllerGetButton(p->controller,face[p->layout!=0][i]))buttons|=(uint8_t)(PAD_A<<i);
-    if(SDL_GameControllerGetButton(p->controller,SDL_CONTROLLER_BUTTON_START))buttons|=PAD_START;
+    for(unsigned i=0;i<4;++i)
+        if(SDL_GameControllerGetButton(p->controller,(SDL_GameControllerButton)sdl_pad_binding(p,i)))
+            buttons|=(uint8_t)(PAD_A<<i);
     p->stick_x=sdl_pad_axis(SDL_GameControllerGetAxis(p->controller,SDL_CONTROLLER_AXIS_LEFTX),p->stick_x);
     p->stick_y=sdl_pad_axis(SDL_GameControllerGetAxis(p->controller,SDL_CONTROLLER_AXIS_LEFTY),p->stick_y);
     if(p->stick_x<0 || SDL_GameControllerGetButton(p->controller,SDL_CONTROLLER_BUTTON_DPAD_LEFT))buttons|=PAD_LEFT;

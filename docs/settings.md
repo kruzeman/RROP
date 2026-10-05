@@ -17,7 +17,7 @@ Saves remain available. **Mode: Enhanced** exposes these options:
 | Smooth map | Interpolated outdoor camera scrolling |
 | Zoom | Mouse-wheel zoom between 50% and 100% |
 | Mouse controls | Left-button movement; right-button native automatic walking |
-| Control settings | Gamepad toggle and Genesis A/B/C layout; available in both modes |
+| Control settings | Gamepad toggle, presets and A/B/C/START button assignment; available in both modes |
 
 [Gamepad controls](gamepads.md) lists mappings and supported controllers.
 

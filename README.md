@@ -17,7 +17,7 @@ The project focuses on one verified game revision, with optional improvements:
 - Viewport zoom from 50% to 100% and smooth outdoor camera scrolling.
 - Live replacement of the game's text with an external TTF/OTF font.
 - Mouse movement and the game's native automatic walking.
-- SDL2 gamepads, hotplug and two Genesis A/B/C layouts.
+- SDL2 gamepads, hotplug, presets and custom A/B/C/START buttons.
 - YM2612/PSG sound, Linux builds and Windows x64 packaging.
 - Five manual saves and five rotating autosaves, every five minutes of active play.
 - In-game Settings and save menus styled using the game's parchment.

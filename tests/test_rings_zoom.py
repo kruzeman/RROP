@@ -210,7 +210,8 @@ int main(int argc,char **argv) {
     def test_wheel_clamps_flipped_direction_and_reset_without_advancing_game(self):
         self.check_sdl(r'''
 vdp_render(c);assert(sdl_host_service(&h,c));assert(h.zoom_percent==100);
-uint64_t frame=c->vdp.rendered_frames;c->pad_buttons[0]=PAD_RIGHT;
+SDL_Event held={0};held.type=SDL_KEYDOWN;held.key.keysym.sym=SDLK_RIGHT;
+assert(SDL_PushEvent(&held)==1);assert(sdl_host_service(&h,c));uint64_t frame=c->vdp.rendered_frames;
 wheel(-1,SDL_MOUSEWHEEL_NORMAL);assert(sdl_host_service(&h,c));assert(h.zoom_percent==90 && h.last_zoom==90);
 assert(c->vdp.rendered_frames==frame && !c->steps && !c->cycles && c->pad_buttons[0]==PAD_RIGHT);
 wheel(2147483647,SDL_MOUSEWHEEL_NORMAL);assert(sdl_host_service(&h,c));assert(h.zoom_percent==100);

@@ -33,9 +33,26 @@ center between menu steps; holding it does not repeat navigation.
 
 Open Settings → Control settings to enable/disable controller input, see the
 connected device's name, or select the alternate mapping: controller A/B/X →
-Genesis A/B/C. These preferences persist in `settings.cfg` as `gamepad` and
-`pad_layout`, independently of saved game slots. Existing settings files default
-to enabled and X/A/B. Individual button remapping is not provided yet.
+Genesis A/B/C. **Assign buttons: A / B / C / START** opens a four-step wizard:
+press the controller button you want for each Genesis action, releasing it
+between steps. The current action is highlighted on the parchment. All four
+bindings are applied and saved together when START is assigned.
+
+Escape on the keyboard or Back/Select on the controller cancels the wizard
+without changing the current layout. Disconnecting the controller or losing
+window focus also cancels. Duplicate bindings are rejected. D-pad, Back,
+Guide/Home and LB/RB remain reserved for movement and host-menu shortcuts;
+analog axes/triggers cannot be assigned as buttons. Host-menu navigation keeps
+its fixed A/X/Start confirm and B/Back cancel controls, independently of the
+chosen Genesis layout. Keyboard Z/X/C/Enter is unchanged.
+
+**Reset buttons** restores X/A/B plus Start. Choosing a preset also replaces a
+custom layout. Preferences persist in `settings.cfg` as `gamepad`, `pad_layout`,
+`pad_custom`, `pad_a`, `pad_b`, `pad_c` and `pad_start`, independently of saved game
+slots. Old files remain compatible. Invalid or incomplete custom bindings fall
+back to the selected preset. SDL button names describe logical positions;
+these settings apply to the active controller and remain available after
+reconnecting or restarting RROP.
 
 Disabling the controller also disables its menu shortcuts. Use the keyboard to
 enable it again. Keyboard input remains active when the controller is disabled.
