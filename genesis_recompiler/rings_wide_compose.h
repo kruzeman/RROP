@@ -3,14 +3,17 @@
 #define GENESIS_RINGS_WIDE_COMPOSE_H
 #ifdef GENESIS_RINGS_WIDE
 #include "rings_hud.h"
-static int rings_wide_visible(const CPU *c) {
+static int rings_bitmap_visible(const CPU *c) {
     const VDP *v=&c->vdp;const RingsWide *w=c->wide;
-    if(v->native_scene || !w || !w->valid || w->replaying || v->frame_width!=320 || !(v->registers[1]&0x40) ||
+    if(!w || w->replaying || v->frame_width!=320 || !(v->registers[1]&0x40) ||
        (v->registers[12]&8) || ((v->registers[3]&0x3c)<<10)!=0x1000)return 0;
     if(!vdp_window_at(v,16,0) || !vdp_window_at(v,303,151))return 0;
     unsigned matches=0;
     for(unsigned x=2;x<38;++x)if(vdp_word(v,0x1000+x*2)==(unsigned)(w->bank+x-2))++matches;
     return matches>=12;
+}
+static int rings_wide_visible(const CPU *c) {
+    return !c->vdp.native_scene && c->wide && c->wide->valid && rings_bitmap_visible(c);
 }
 static int rings_world_foreground(const VDP *v,const uint8_t *sprites,unsigned x,unsigned y) {
     unsigned at,sx,sy;

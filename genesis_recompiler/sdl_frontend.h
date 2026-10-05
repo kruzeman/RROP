@@ -12,6 +12,7 @@
 #endif
 
 typedef struct {
+    CPU *console; /* Borrowed only for immutable ROM reads on the shadow CPU. */
     SDL_Window *window;
 #ifdef GENESIS_RINGS_SAVES
     RingsSaves *saves;
@@ -32,6 +33,8 @@ typedef struct {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     RingsCameraTween camera;
     int spill_x,spill_y,last_smooth;
+    int native_actor_x,native_actor_y;
+    uint8_t *native_pixels;
 #endif
 #ifdef GENESIS_RINGS_WIDE
     RingsMouse mouse;
@@ -41,8 +44,16 @@ typedef struct {
     unsigned zoom_width,zoom_height;
 #endif
 } SDLHost;
+#ifdef GENESIS_RINGS_WIDE
+static unsigned sdl_host_scene_percent(const SDLHost *h,const VDP *v) {
+    return v->native_scene ? 100:h->zoom_percent;
+}
+#endif
 
 static void sdl_host_close(SDLHost *h) {
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+    free(h->native_pixels);h->native_pixels=NULL;
+#endif
 #ifdef GENESIS_RINGS_SAVES
     SDL_DestroyTexture(h->settings.paper_texture);
 #endif
@@ -151,11 +162,24 @@ static int sdl_host_spill_upload(SDLHost *h,const VDP *v) {
     for(unsigned y=0;y<RINGS_ZOOM_HEIGHT;++y)for(unsigned x=0;x<RINGS_ZOOM_WIDTH;++x) {
         unsigned p=y*RINGS_ZOOM_WIDTH+x,ink=v->zoom_scene[p];uint8_t *out=h->zoom_pixels+p*4;
         memcpy(out,v->zoom_palette+ink*3,3);
-        out[3]=rings_zoom_spill_shift(v,(int)x,(int)y,h->zoom_percent,dx,dy) ? 255:0;
+        out[3]=rings_zoom_spill_shift(v,(int)x,(int)y,sdl_host_scene_percent(h,v),dx,dy) ? 255:0;
     }
     return SDL_UpdateTexture(h->zoom_spill,NULL,h->zoom_pixels,RINGS_ZOOM_WIDTH*4) ? sdl_host_error(h,"zoom elevated upload failed"):1;
 }
-static int sdl_host_zoom_upload(SDLHost *h,const VDP *v,const uint8_t *base) {
+static int sdl_host_zoom_upload(SDLHost *h,CPU *c,const VDP *v,const uint8_t *base) {
+    const uint8_t *scene=v->zoom_scene;
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+    if(v->native_scene && v->native_motion.valid) {
+        if(!h->native_pixels)h->native_pixels=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
+        if(!h->native_pixels)return sdl_host_error(h,"native motion allocation failed");
+        h->native_actor_x=rings_camera_round(h->camera.hero_x);h->native_actor_y=rings_camera_round(h->camera.hero_y);
+        if(!rings_native_pixels(c,v,h->native_actor_x,h->native_actor_y,h->native_pixels))
+            return sdl_host_error(h,"native motion resource rendering failed");
+        scene=h->native_pixels;
+    }
+#else
+    (void)c;
+#endif
     if(!h->zoom_pixels)h->zoom_pixels=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT*4);
     if(!h->zoom_pixels)return sdl_host_error(h,"zoom buffer allocation failed");
     if(!h->zoom_world) {
@@ -176,7 +200,7 @@ static int sdl_host_zoom_upload(SDLHost *h,const VDP *v,const uint8_t *base) {
         memcpy(h->zoom_pixels+p*3,v->zoom_restore[p] ? v->zoom_background+p*3:base+p*3,3);
     if(SDL_UpdateTexture(h->texture,NULL,h->zoom_pixels,h->width*3))return sdl_host_error(h,"zoom background upload failed");
     for(unsigned p=0;p<RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT;++p) {
-        unsigned ink=v->zoom_scene[p];uint8_t *out=h->zoom_pixels+p*4;
+        unsigned ink=scene[p];uint8_t *out=h->zoom_pixels+p*4;
         memcpy(out,v->zoom_palette+ink*3,3);out[3]=ink ? 255:0;
     }
     if(SDL_UpdateTexture(h->zoom_world,NULL,h->zoom_pixels,RINGS_ZOOM_WIDTH*4))return sdl_host_error(h,"zoom scene upload failed");
@@ -213,11 +237,12 @@ static int sdl_host_zoom_draw(SDLHost *h,const VDP *v) {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     camera_x=h->camera.x;camera_y=h->camera.y;
 #endif
-    RingsWindowLayout canvas=rings_window_layout(v,width,height,h->zoom_percent,camera_x,camera_y);
+    unsigned percent=sdl_host_scene_percent(h,v);
+    RingsWindowLayout canvas=rings_window_layout(v,width,height,percent,camera_x,camera_y);
     double scale=canvas.world_scale;
     SDL_Rect viewport={0,0,(int)(h->width*scale+0.5),(int)(h->height*scale+0.5)};
     viewport.x=(int)(canvas.world_x+0.5);viewport.y=(int)(canvas.world_y+0.5);
-    double zoom=h->zoom_percent/100.0;
+    double zoom=percent/100.0;
     int target_x=(int)v->zoom_focus_x-RINGS_ZOOM_LEFT+16-(rings_view_wide(v) ? 0:40);
     int target_y=(int)v->zoom_focus_y-RINGS_ZOOM_TOP;
     double world_x=canvas.adaptive ? canvas.world_x:viewport.x;
@@ -227,7 +252,7 @@ static int sdl_host_zoom_draw(SDLHost *h,const VDP *v) {
                      (float)(RINGS_ZOOM_WIDTH*zoom*scale),(float)(RINGS_ZOOM_HEIGHT*zoom*scale)};
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     world.x+=(float)(h->camera.x*scale);world.y+=(float)(h->camera.y*scale);
-    if(h->camera.active)++h->camera.motion_frames;
+    if(h->camera.active || h->camera.hero_active)++h->camera.motion_frames;
 #endif
     if(canvas.adaptive) {
         SDL_SetRenderDrawColor(h->renderer,v->zoom_background[0],v->zoom_background[1],v->zoom_background[2],255);
@@ -288,6 +313,10 @@ static int sdl_host_draw(SDLHost *h, const VDP *v) {
     int zoom_active=v->zoom_world_visible && (rings_view_wide(v) || (v->zoom_enabled && h->zoom_percent!=100));
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     zoom_active|=h->camera.enabled && v->zoom_world_visible && v->camera.valid;
+    int native_active=h->console && h->camera.enabled && v->native_scene && v->native_motion.valid && v->camera.valid;
+    zoom_active|=native_active;
+    upload|=native_active && (h->native_actor_x!=rings_camera_round(h->camera.hero_x) ||
+                            h->native_actor_y!=rings_camera_round(h->camera.hero_y));
     upload|=h->last_smooth!=zoom_active;h->last_smooth=zoom_active;
 #endif
     upload|=zoom_active && (!h->zoom_ui || h->zoom_width!=h->width || h->zoom_height!=h->height);
@@ -307,7 +336,7 @@ static int sdl_host_draw(SDLHost *h, const VDP *v) {
         }
         h->last_zoom=h->zoom_percent;
         if(zoom_active) {
-            if(!sdl_host_zoom_upload(h,v,pixels))return 0;
+            if(!sdl_host_zoom_upload(h,h->console,v,pixels))return 0;
         } else
 #endif
         if (SDL_UpdateTexture(h->texture,NULL,pixels,presentation_width*3))
@@ -364,6 +393,7 @@ static void sdl_host_stop(SDLHost *h, const CPU *c) {
     SDL_SetWindowTitle(h->window,title);
 }
 static int sdl_host_service(SDLHost *h, CPU *c) {
+    h->console=c;
     int redraw=0;
     SDL_Event event;
     while (SDL_PollEvent(&event)) {

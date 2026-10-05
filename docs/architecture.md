@@ -40,7 +40,11 @@ verified game render routines and are specific to this ROM revision.
 `rings_text_capture.h`, `rings_text.h` and `rings_font_sdl.h` capture the game's
 text and redraw it with an external font. They do not substitute a fixed list
 of translated dialogue strings. `rings_camera*` interpolates visual map motion;
-it does not accelerate game logic. `rings_mouse*` submits directional movement
+it does not accelerate game logic. Native scenes capture a bounded list of draw
+calls from the original 10×10 traversal, commit it after bitmap upload, and
+replay the resource writers with a finite hero offset for presentation. The
+hero and shadow keep the last submitted scene's draw order. Derived motion
+records and host tweens are omitted from save files. `rings_mouse*` submits directional movement
 and native A + direction requests rather than implementing independent pathfinding.
 
 `rings_settings_*` manages host preferences and adds Settings entry points to

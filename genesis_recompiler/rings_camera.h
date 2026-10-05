@@ -10,12 +10,25 @@ typedef struct {
     unsigned duration_ms,percent;
     uint16_t focus_x,focus_y;
     int enabled,ready,active,wide;
+    uint64_t hero_start,hero_span;
+    double hero_from_x,hero_from_y,hero_x,hero_y;
+    int32_t hero_world_x,hero_world_y;
+    int native,hero_ready,hero_active;
 } RingsCameraTween;
 static double rings_camera_abs(double x) {return x<0 ? -x:x;}
 static void rings_camera_reset(RingsCameraTween *t) {
     t->ready=0;t->active=0;t->x=0;t->y=0;t->from_x=0;t->from_y=0;
+    t->hero_ready=t->hero_active=0;t->hero_x=t->hero_y=0;t->hero_from_x=t->hero_from_y=0;
 }
 static void rings_camera_evaluate(RingsCameraTween *t,uint64_t now) {
+    if(t->hero_active) {
+        uint64_t elapsed=now>=t->hero_start ? now-t->hero_start:0;
+        if(elapsed>=t->hero_span) {t->hero_x=t->hero_y=0;t->hero_active=0;}
+        else {
+            double left=1.0-(double)elapsed/(double)t->hero_span;
+            t->hero_x=t->hero_from_x*left;t->hero_y=t->hero_from_y*left;
+        }
+    }
     if(!t->active)return;
     uint64_t elapsed=now>=t->start ? now-t->start:0;
     if(elapsed>=t->span) {t->x=t->y=0;t->active=0;return;}
@@ -23,14 +36,21 @@ static void rings_camera_evaluate(RingsCameraTween *t,uint64_t now) {
     t->x=t->from_x*left;t->y=t->from_y*left;
 }
 static void rings_camera_update(RingsCameraTween *t,const VDP *v,uint64_t now,unsigned hz,unsigned percent) {
-    if(!t->enabled || !v->zoom_world_visible || !v->camera.valid || !hz) {
+    int native=v->native_scene && v->native_motion.valid;
+    if(native)percent=100;
+    if(!t->enabled || (!v->zoom_world_visible && !native) || !v->camera.valid || !hz) {
         rings_camera_reset(t);t->now=now;return;
     }
-    if(t->ready && (now<t->now || t->wide!=rings_view_wide(v) || t->percent!=percent))rings_camera_reset(t);
+    if(t->ready && (now<t->now || t->native!=native || t->wide!=rings_view_wide(v) || t->percent!=percent))rings_camera_reset(t);
     t->now=now;rings_camera_evaluate(t,now);
     if(!t->ready) {
         t->scene=v->camera;t->focus_x=v->zoom_focus_x;t->focus_y=v->zoom_focus_y;
-        t->percent=percent;t->wide=rings_view_wide(v);t->ready=1;return;
+        t->percent=percent;t->wide=rings_view_wide(v);t->native=native;t->ready=1;
+        if(native && v->native_motion.hero_valid) {
+            t->hero_world_x=v->native_motion.hero_x+v->camera.x;
+            t->hero_world_y=v->native_motion.hero_y+v->camera.y;t->hero_ready=1;
+        }
+        return;
     }
     if(t->scene.generation==v->camera.generation)return;
     double zoom=percent/100.0;
@@ -42,6 +62,23 @@ static void rings_camera_update(RingsCameraTween *t,const VDP *v,uint64_t now,un
         rings_camera_abs((double)v->zoom_focus_x-t->focus_x)<=48 &&
         rings_camera_abs((double)v->zoom_focus_y-t->focus_y)<=48;
     t->scene=v->camera;t->focus_x=v->zoom_focus_x;t->focus_y=v->zoom_focus_y;
+    if(native) {
+        int32_t hx=v->native_motion.hero_x+v->camera.x,hy=v->native_motion.hero_y+v->camera.y;
+        int hx_delta=hx-t->hero_world_x,hy_delta=hy-t->hero_world_y;
+        int hero_continuous=continuous && t->hero_ready && v->native_motion.hero_valid &&
+            rings_camera_abs(hx_delta)<=56 && rings_camera_abs(hy_delta)<=32;
+        if(!hero_continuous) {t->hero_x=t->hero_y=0;t->hero_active=0;}
+        else if(hx_delta || hy_delta) {
+            /* Offset in world space: camera movement then cancels out of a
+               centered actor. No predicted steps and no queued input. */
+            t->hero_from_x=t->hero_x-hx_delta;t->hero_from_y=t->hero_y-hy_delta;
+            t->hero_x=t->hero_from_x;t->hero_y=t->hero_from_y;t->hero_start=now;
+            t->hero_span=(uint64_t)hz*(t->duration_ms ? t->duration_ms:200)/1000;
+            if(!t->hero_span)t->hero_span=1;
+            t->hero_active=1;
+        }
+        t->hero_world_x=hx;t->hero_world_y=hy;t->hero_ready=v->native_motion.hero_valid;
+    }
     if(!continuous) {t->x=t->y=0;t->active=0;return;}
     if(!dx && !dy)return;
     t->from_x=t->x+dx;t->from_y=t->y+dy;t->start=now;

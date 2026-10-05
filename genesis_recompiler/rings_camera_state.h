@@ -8,5 +8,20 @@ typedef struct {
     int32_t x,y;
     uint8_t valid;
 } RingsCameraSnapshot;
+/* Native draw calls, frozen only after the bitmap upload completes. These
+   derived presentation records are deliberately absent from save files. */
+enum { RINGS_NATIVE_DRAWS=2048 };
+typedef struct {
+    uint16_t id;
+    int16_t x,y;
+    uint8_t flipped,hero;
+} RingsNativeDraw;
+typedef struct {
+    RingsCameraSnapshot camera;
+    RingsNativeDraw draw[RINGS_NATIVE_DRAWS];
+    unsigned count;
+    int16_t hero_x,hero_y;
+    uint8_t valid,hero_valid,overflow;
+} RingsNativeMotion;
 #endif
 #endif

@@ -10,6 +10,8 @@ typedef struct {
     void *shadow;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     RingsCameraSnapshot camera_work,camera;
+    RingsNativeMotion native_work,native;
+    uint8_t native_pending;
 #endif
     uint8_t work[RINGS_WIDE_FIELD*RINGS_SCENE_HEIGHT];
     uint8_t scene[RINGS_WIDE_FIELD*RINGS_SCENE_HEIGHT];

@@ -67,12 +67,13 @@ v->zoom_world_visible=1;rings_camera_update(&t,v,1270,1000,80);assert(!t.active)
 v->camera.valid=0;rings_camera_update(&t,v,1280,1000,80);assert(!t.ready);
 ''')
 
-    def test_capture_and_commit_use_the_submitted_scene_and_skip_rooms(self):
+    def test_capture_and_commit_use_the_submitted_scene_and_fixed_origin(self):
         self.check(r'''
 c->ram[0xa7fc]=0xff;c->ram[0xa7fd]=0xff;c->ram[0xa7fe]=0xb0;c->ram[0xa7ff]=0x8c;
 c->ram[0xe8f]=111;c->ram[0xe91]=125;c->ram[0xb099]=1;
 RingsCameraSnapshot a=rings_camera_capture(c);assert(a.valid && a.x==-196 && a.y==1888);
-c->ram[0xb099]=0;assert(!rings_camera_capture(c).valid);c->ram[0xb099]=1;
+c->ram[0xb099]=0;RingsCameraSnapshot room=rings_camera_capture(c);
+assert(room.valid && !room.x && !room.y && room.identity!=a.identity);c->ram[0xb099]=1;
 c->ram[0x8674]=4;c->ram[0x8675]=0;w.camera_work=a;w.pending=1;c->pc=0x1b9ee;c->master_cycles=123456;
 c->ram[0xe8f]=115;rings_wide_observe(c);
 assert(w.camera.x==-196 && w.camera.generation==1 && w.camera.clocks==123456);

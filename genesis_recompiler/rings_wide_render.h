@@ -9,8 +9,8 @@ static int rings_wide_rom(CPU *c,unsigned at,unsigned *byte) {
 }
 /* Each resource row has a byte-count/left-skip header and packed 4bpp pixels.
    Zero nibbles are transparent; the mirrored writer reverses bytes/nibbles. */
-static int rings_wide_resource(CPU *c,uint8_t *out,unsigned width,unsigned height,
-                               unsigned id,int x,int y,int flipped,int shift) {
+static int rings_wide_resource_shifted(CPU *c,uint8_t *out,unsigned width,unsigned height,
+                               unsigned id,int x,int y,int flipped,int shift,int dx,int dy) {
     if(id>=944 || !width || !height)return 0;
     unsigned at=0,byte;
     for(unsigned i=0;i<4;++i) {
@@ -23,6 +23,7 @@ static int rings_wide_resource(CPU *c,uint8_t *out,unsigned width,unsigned heigh
     uint8_t *lift=w && w->replaying && w->grid==32 && out==w->zoom_work ? w->lift_work:NULL;
     x=(int16_t)((uint16_t)x&0xfffe); /* Original packed-pixel alignment. */
     if(y<-21)return 1; /* The verified original writer's top rejection. */
+    x+=dx;y+=dy;
     for(unsigned row=0;row<64;++row,++y) {
         unsigned header;
         if(!rings_wide_rom(c,at++,&header))return 0;
@@ -48,6 +49,10 @@ static int rings_wide_resource(CPU *c,uint8_t *out,unsigned width,unsigned heigh
         }
     }
     return 0;
+}
+static int rings_wide_resource(CPU *c,uint8_t *out,unsigned width,unsigned height,
+                               unsigned id,int x,int y,int flipped,int shift) {
+    return rings_wide_resource_shifted(c,out,width,height,id,x,y,flipped,shift,0,0);
 }
 static int rings_wide_open(CPU *c,RingsWide *w) {
     w->shadow=calloc(1,sizeof(CPU));
@@ -88,6 +93,19 @@ static int rings_wide_replay(CPU *source,unsigned grid) {
             int x=(int16_t)read_mem(c,c->a[7]+6,2),y=(int16_t)read_mem(c,c->a[7]+8,2);
             int flipped=!!read_mem(c,c->a[7]+10,2);
             unsigned caller=read_mem(c,c->a[7],4)&0xffffff;
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+            if(grid==10) {
+                RingsNativeMotion *m=&w->native_work;
+                if(m->count<RINGS_NATIVE_DRAWS) {
+                    RingsNativeDraw *d=&m->draw[m->count++];
+                    d->id=(uint16_t)id;d->x=(int16_t)x;d->y=(int16_t)y;
+                    d->flipped=(uint8_t)flipped;d->hero=w->tracking_hero;
+                } else m->overflow=1;
+                if(w->tracking_hero && id==0x209 && !flipped) {
+                    m->hero_x=(int16_t)(x&~1);m->hero_y=(int16_t)y;m->hero_valid=1;
+                }
+            }
+#endif
             /* Terrain is lowered by seven pixels per height level. Actors
                stand on this tile's ground and can rise above its footprint.
                Record ownership at every opaque write, including flat ground
@@ -128,13 +146,13 @@ static RingsCameraSnapshot rings_camera_capture(const CPU *c) {
     RingsCameraSnapshot m={0};
     unsigned context=(rings_camera_ram_word(c,0xa7fc)<<16)|rings_camera_ram_word(c,0xa7fe);
     context&=0xffffff;
-    if(context<0xe00000)return m;
+    if(context<0xe00000 || (context&1))return m;
     unsigned kind=rings_camera_ram_word(c,context+12);
-    /* Fixed-size rooms use a different origin transform. Do not pan them. */
-    if(!kind)return m;
     int x=(int16_t)rings_camera_ram_word(c,0xe8e),y=(int16_t)rings_camera_ram_word(c,0xe90);
-    m.x=14*(x-y);m.y=8*(x+y);m.valid=1;
-    m.identity=((uint64_t)context<<32)|((uint64_t)rings_camera_ram_word(c,context)<<16)|rings_camera_ram_word(c,context+2);
+    /* $020D58 uses a zero origin for fixed rooms, regardless of the hero's
+       coordinates. Scrolling maps, including indoor maps, use this transform. */
+    m.x=kind ? 14*(x-y):0;m.y=kind ? 8*(x+y):0;m.valid=1;
+    m.identity=rings_scene_identity(c);
     return m;
 }
 #endif
@@ -144,7 +162,32 @@ static void rings_wide_observe(CPU *c) {
     /* Only the redraw/upload boundaries need the live map classification.
        VDP snapshots handle changes between them; keep the CPU hot path small. */
     if(c->pc!=0x1b950 && c->pc!=0x1b9ee)return;
-    if((!c->vdp.wide_enabled && !c->vdp.zoom_enabled) || rings_scene_native(c)) {rings_scene_discard(c);return;}
+    if(!c->vdp.wide_enabled && !c->vdp.zoom_enabled) {rings_scene_discard(c);return;}
+    if(rings_scene_native(c)) {
+        w->pending=w->zoom_pending=w->valid=w->zoom_valid=0;
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+        /* Replay precisely the original 10x10 traversal. Never extend a
+           room/combat map and wrap its tiles beyond the room's walls. */
+        if(c->pc==0x1b950 && (c->ram[0x98] || c->ram[0x99])) {
+            memset(&w->native_work,0,sizeof w->native_work);
+            w->native_work.camera=rings_camera_capture(c);
+            w->native_pending=(uint8_t)rings_wide_replay(c,10);
+            if(!w->native_pending)w->native.valid=0;
+        }
+        if(c->pc==0x1b9ee && w->native_pending) {
+            w->native_pending=0;w->native=w->native_work;
+            w->native.valid=(uint8_t)(w->native.camera.valid && !w->native.overflow && w->native.count);
+            w->native.camera.generation=++w->scenes;w->native.camera.clocks=c->master_cycles;
+            w->bank=(uint16_t)(((unsigned)c->ram[0x8674]<<8)|c->ram[0x8675]);
+        }
+#else
+        rings_scene_discard(c);
+#endif
+        return;
+    }
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+    w->native.valid=0;w->native_pending=0;
+#endif
     if(c->pc==0x1b950 && (c->ram[0x98] || c->ram[0x99])) {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
         w->camera_work=rings_camera_capture(c);

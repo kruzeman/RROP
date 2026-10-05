@@ -13,20 +13,50 @@ static const uint8_t *rings_view_pixels(const VDP *v,int external_font) {
 #endif
     return rings_view_wide(v) ? v->wide_frame:v->frame;
 }
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+static int rings_wide_resource_shifted(CPU *c,uint8_t *out,unsigned width,unsigned height,
+                                      unsigned id,int x,int y,int flipped,int shift,int dx,int dy);
+static int rings_native_pixels(CPU *c,const VDP *v,int dx,int dy,uint8_t *out) {
+    if(!c->wide || !c->wide->shadow || !v->native_motion.valid)return 0;
+    CPU *shadow=c->wide->shadow;
+    /* A newer disposable traversal can have failed while this completed
+       frame remains visible. Its fault must not poison ROM-only decoding. */
+    shadow->fault=0;
+    memset(out,0,RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
+    for(unsigned i=0;i<v->native_motion.count;++i) {
+        const RingsNativeDraw *d=&v->native_motion.draw[i];
+        if(!rings_wide_resource_shifted(shadow,out,RINGS_ZOOM_WIDTH,RINGS_ZOOM_HEIGHT,
+                d->id,d->x,d->y,d->flipped,RINGS_ZOOM_LEFT+40,
+                d->hero ? dx:0,RINGS_ZOOM_TOP+(d->hero ? dy:0)))return 0;
+    }
+    return 1;
+}
+#endif
 static void rings_zoom_prepare(CPU *c,const uint8_t *sprites) {
     VDP *v=&c->vdp;const RingsWide *w=c->wide;
     unsigned width=rings_view_width(v),height=v->frame_height,offset=(width-v->frame_width)/2;
     memset(v->zoom_mask,0,sizeof v->zoom_mask);
     memset(v->zoom_restore,0,sizeof v->zoom_restore);
     v->zoom_world_visible=(uint8_t)(rings_wide_visible(c) && w->zoom_valid);
+    int native=0;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
-    if(v->zoom_world_visible)v->camera=w->camera;else v->camera.valid=0;
+    native=v->native_scene && v->native_motion.valid && rings_bitmap_visible(c);
+    if(v->zoom_world_visible)v->camera=w->camera;
+    else if(!native) {v->camera.valid=0;v->native_motion.valid=0;}
 #endif
-    if(!v->zoom_world_visible)return;
-    memcpy(v->zoom_scene,w->zoom_scene,sizeof v->zoom_scene);
-    memcpy(v->zoom_lift,w->lift_scene,sizeof v->zoom_lift);
-    v->zoom_focus_x=(w->focus_x ? w->focus_x:184)+RINGS_ZOOM_LEFT;
-    v->zoom_focus_y=(w->focus_y ? w->focus_y:RINGS_SCENE_TOP+96)+RINGS_ZOOM_TOP-RINGS_SCENE_TOP;
+    if(!v->zoom_world_visible && !native)return;
+    if(native) {
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+        if(!rings_native_pixels(c,v,0,0,v->zoom_scene)) {v->native_motion.valid=0;v->camera.valid=0;return;}
+#endif
+        memset(v->zoom_lift,0,sizeof v->zoom_lift);
+        v->zoom_focus_x=184+RINGS_ZOOM_LEFT;v->zoom_focus_y=96+RINGS_ZOOM_TOP;
+    } else {
+        memcpy(v->zoom_scene,w->zoom_scene,sizeof v->zoom_scene);
+        memcpy(v->zoom_lift,w->lift_scene,sizeof v->zoom_lift);
+        v->zoom_focus_x=(w->focus_x ? w->focus_x:184)+RINGS_ZOOM_LEFT;
+        v->zoom_focus_y=(w->focus_y ? w->focus_y:RINGS_SCENE_TOP+96)+RINGS_ZOOM_TOP-RINGS_SCENE_TOP;
+    }
     for(unsigned i=0;i<16;++i) {
         unsigned rgb=v->cram[i];
         v->zoom_palette[i*3]=vdp_channel((rgb>>1)&7,1);
