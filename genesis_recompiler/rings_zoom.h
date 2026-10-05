@@ -34,18 +34,21 @@ static int rings_hero_pixels(CPU *c,const VDP *v,int dx,int dy,uint8_t *out,uint
     }
     return 1;
 }
-static int rings_native_pixels(CPU *c,const VDP *v,int dx,int dy,uint8_t *out) {
+static int rings_native_pixels(CPU *c,const VDP *v,int dx,int dy,uint8_t *out,uint8_t *lift) {
     if(!c->wide || !c->wide->shadow || !v->native_motion.valid)return 0;
     CPU *shadow=c->wide->shadow;
     /* A newer disposable traversal can have failed while this completed
        frame remains visible. Its fault must not poison ROM-only decoding. */
     shadow->fault=0;
     memset(out,0,RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
+    memset(lift,0,RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
     for(unsigned i=0;i<v->native_motion.count;++i) {
         const RingsNativeDraw *d=&v->native_motion.draw[i];
-        if(!rings_wide_resource_shifted(shadow,out,RINGS_ZOOM_WIDTH,RINGS_ZOOM_HEIGHT,
+        int my=d->hero ? dy:0;
+        int ground=d->ground+(d->actor ? RINGS_ZOOM_TOP+my:0);
+        if(!rings_wide_resource_layer(shadow,out,RINGS_ZOOM_WIDTH,RINGS_ZOOM_HEIGHT,
                 d->id,d->x,d->y,d->flipped,RINGS_ZOOM_LEFT+40,
-                d->hero ? dx:0,RINGS_ZOOM_TOP+(d->hero ? dy:0)))return 0;
+                d->hero ? dx:0,RINGS_ZOOM_TOP+my,lift,ground,d->actor))return 0;
     }
     return 1;
 }
@@ -65,9 +68,8 @@ static void rings_zoom_prepare(CPU *c,const uint8_t *sprites) {
     if(!v->zoom_world_visible && !native)return;
     if(native) {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
-        if(!rings_native_pixels(c,v,0,0,v->zoom_scene)) {v->native_motion.valid=0;v->camera.valid=0;return;}
+        if(!rings_native_pixels(c,v,0,0,v->zoom_scene,v->zoom_lift)) {v->native_motion.valid=0;v->camera.valid=0;return;}
 #endif
-        memset(v->zoom_lift,0,sizeof v->zoom_lift);
         v->zoom_focus_x=184+RINGS_ZOOM_LEFT;v->zoom_focus_y=96+RINGS_ZOOM_TOP;
     } else {
         memcpy(v->zoom_scene,w->zoom_scene,sizeof v->zoom_scene);
@@ -108,7 +110,11 @@ static void rings_zoom_prepare(CPU *c,const uint8_t *sprites) {
         unsigned pixel=y*width+x;
         v->zoom_restore[pixel]=1;
         unsigned b=central && !rings_view_wide(v) ? vdp_plane_pixel(v,1,gx,y):0;
-        v->zoom_mask[pixel]=(uint8_t)(rings_view_wide(v) || !(b&15));
+        /* The native 10x10 bitmap already contains the game's accepted
+           silhouettes over the diamond edge. Plane B must show through its
+           transparent pixels, not clip its trees, walls or moving actors.
+           Extended outdoor scenes still need the ground aperture mask. */
+        v->zoom_mask[pixel]=(uint8_t)(native || rings_view_wide(v) || !(b&15));
         unsigned rgb=v->cram[(b&15) ? b&63:v->registers[7]&63];
         v->zoom_background[pixel*3]=vdp_channel((rgb>>1)&7,1);
         v->zoom_background[pixel*3+1]=vdp_channel((rgb>>5)&7,1);

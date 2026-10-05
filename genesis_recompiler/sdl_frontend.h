@@ -166,7 +166,7 @@ static int sdl_host_spill_upload(SDLHost *h,const VDP *v) {
     h->spill_x=dx;h->spill_y=dy;
     if(h->actor_scene && h->actor_frame==v->rendered_frames) {
         scene=h->native_pixels;
-        if(!v->native_scene)lift=h->motion_lift;
+        lift=h->motion_lift;
     }
 #endif
     for(unsigned y=0;y<RINGS_ZOOM_HEIGHT;++y)for(unsigned x=0;x<RINGS_ZOOM_WIDTH;++x) {
@@ -183,8 +183,9 @@ static int sdl_host_zoom_upload(SDLHost *h,CPU *c,const VDP *v,const uint8_t *ba
     h->native_actor_x=rings_camera_round(h->camera.hero_x);h->native_actor_y=rings_camera_round(h->camera.hero_y);
     if(v->native_scene && v->native_motion.valid) {
         if(!h->native_pixels)h->native_pixels=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
-        if(!h->native_pixels)return sdl_host_error(h,"native motion allocation failed");
-        if(!rings_native_pixels(c,v,h->native_actor_x,h->native_actor_y,h->native_pixels))
+        if(!h->motion_lift)h->motion_lift=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
+        if(!h->native_pixels || !h->motion_lift)return sdl_host_error(h,"native motion allocation failed");
+        if(!rings_native_pixels(c,v,h->native_actor_x,h->native_actor_y,h->native_pixels,h->motion_lift))
             return sdl_host_error(h,"native motion resource rendering failed");
         scene=h->native_pixels;h->actor_scene=1;
     } else if(h->camera.enabled && v->hero_patch.valid &&

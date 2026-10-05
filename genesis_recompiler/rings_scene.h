@@ -6,6 +6,12 @@ static unsigned rings_scene_word(const CPU *c,unsigned at) {
     return ((unsigned)c->ram[at&65535]<<8)|c->ram[(at+1)&65535];
 }
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
+static int rings_scene_battle(const CPU *c) {
+    /* $01DFAC selects the dedicated combat descriptor at $FFB0BC. Rooms
+       use $FFB09C/$FFB0AC. Combat also draws between map redraws. */
+    unsigned context=((rings_scene_word(c,0xa7fc)<<16)|rings_scene_word(c,0xa7fe))&0xffffff;
+    return context>=0xe00000 && (context&65535)==0xb0bc;
+}
 static uint64_t rings_scene_identity(const CPU *c) {
     unsigned context=((rings_scene_word(c,0xa7fc)<<16)|rings_scene_word(c,0xa7fe))&0xffffff;
     /* Room descriptors are reused at the same RAM address. $0E98 holds the
@@ -51,7 +57,7 @@ static void rings_scene_snapshot(CPU *c) {
     /* Retain only a completed native bitmap's motion records. The outdoor
        camera and extended caches must still be discarded on entry. */
     v->camera.valid=0;
-    if(c->wide && !c->wide->replaying && c->wide->native.valid &&
+    if(!rings_scene_battle(c) && c->wide && !c->wide->replaying && c->wide->native.valid &&
        c->wide->native.camera.identity==rings_scene_identity(c)) {
         v->native_motion=c->wide->native;v->camera=v->native_motion.camera;
     }

@@ -90,17 +90,24 @@ static int rings_wide_replay(CPU *source,unsigned grid) {
     w->tracking_hero=0;w->work_focus_x=184;w->work_focus_y=RINGS_SCENE_TOP+96;
     unsigned steps=0,budget=grid==80 ? 12500000:2000000;uint64_t submissions=0;
     while(!c->fault && steps++<budget && c->pc!=0x1b9e8 && c->pc!=0x1b94c) {
-        if(c->pc==0x231d8) {
+        if(c->pc==0x231d8 || (grid==10 && c->pc==0x2343a)) {
             w->tracking_hero=(read_mem(c,c->a[7]+4,4)&0xffffff)==0xffb0cc;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
             int hx=(int16_t)read_mem(c,c->a[7]+8,2),hy=(int16_t)read_mem(c,c->a[7]+10,2);
             /* Expanded traversal can encounter wrapped copies of the hero.
                Only the instance near the original viewport is interpolated. */
             w->primary_hero=(uint8_t)(w->tracking_hero && hx>=112 && hx<=256 && hy>=16 && hy<=128);
+            if(grid==10 && w->tracking_hero) {
+                /* Indoor party poses use $02343A, without the outdoor shadow
+                   resource. Track the tile ground, independent of the pose. */
+                w->native_work.hero_x=(int16_t)hx;
+                w->native_work.hero_y=(int16_t)(hy+(int16_t)read_mem(c,c->a[7]+12,2)+20);
+                w->native_work.hero_valid=1;
+            }
 #endif
         }
-        if(c->pc==0x232aa)w->tracking_hero=0;
-        if(grid>=32 && c->pc==0x1baea)
+        if(c->pc==0x232aa || (grid==10 && c->pc==0x23626))w->tracking_hero=0;
+        if((grid==10 || grid>=32) && c->pc==0x1baea)
             w->tile_ground_y=(int16_t)read_mem(c,c->a[6]-12,2);
         if(c->pc==0x1386a) {
             /* Presentation traversal does not wait for the live console IRQ. */
@@ -111,6 +118,8 @@ static int rings_wide_replay(CPU *source,unsigned grid) {
             int x=(int16_t)read_mem(c,c->a[7]+6,2),y=(int16_t)read_mem(c,c->a[7]+8,2);
             int flipped=!!read_mem(c,c->a[7]+10,2);
             unsigned caller=read_mem(c,c->a[7],4)&0xffffff;
+            w->resource_actor=(uint8_t)(caller!=0x1bc20 && caller!=0x1bc42 && caller!=0x1bc8a);
+            w->resource_ground=w->resource_actor ? w->tile_ground_y+top+20:w->tile_ground_y-y;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
             if(grid==10) {
                 RingsNativeMotion *m=&w->native_work;
@@ -118,18 +127,14 @@ static int rings_wide_replay(CPU *source,unsigned grid) {
                     RingsNativeDraw *d=&m->draw[m->count++];
                     d->id=(uint16_t)id;d->x=(int16_t)x;d->y=(int16_t)y;
                     d->flipped=(uint8_t)flipped;d->hero=w->tracking_hero;
+                    d->actor=w->resource_actor;d->ground=(int16_t)w->resource_ground;
                 } else m->overflow=1;
-                if(w->tracking_hero && id==0x209 && !flipped) {
-                    m->hero_x=(int16_t)(x&~1);m->hero_y=(int16_t)y;m->hero_valid=1;
-                }
             }
 #endif
             /* Terrain is lowered by seven pixels per height level. Actors
                stand on this tile's ground and can rise above its footprint.
                Record ownership at every opaque write, including flat ground
                that subsequently covers an earlier elevated object. */
-            w->resource_actor=(uint8_t)(caller!=0x1bc20 && caller!=0x1bc42 && caller!=0x1bc8a);
-            w->resource_ground=w->resource_actor ? w->tile_ground_y+top+20:w->tile_ground_y-y;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
             if(grid>=32) {
                 RingsHeroPatch *m=&w->hero_work;
@@ -190,11 +195,11 @@ static RingsCameraSnapshot rings_camera_capture(const CPU *c) {
     unsigned context=(rings_camera_ram_word(c,0xa7fc)<<16)|rings_camera_ram_word(c,0xa7fe);
     context&=0xffffff;
     if(context<0xe00000 || (context&1))return m;
-    unsigned kind=rings_camera_ram_word(c,context+12);
     int x=(int16_t)rings_camera_ram_word(c,0xe8e),y=(int16_t)rings_camera_ram_word(c,0xe90);
-    /* $020D58 uses a zero origin for fixed rooms, regardless of the hero's
-       coordinates. Scrolling maps, including indoor maps, use this transform. */
-    m.x=kind ? 14*(x-y):0;m.y=kind ? 8*(x+y):0;m.valid=1;
+    /* $020D58 chooses the map-data origin, not the camera transform. Indoor
+       maps retain absolute map data but still scroll when $0E8E/$0E90 change.
+       Small rooms keep those coordinates fixed while the hero walks. */
+    m.x=14*(x-y);m.y=8*(x+y);m.valid=1;
     m.identity=rings_scene_identity(c);
     return m;
 }
@@ -210,6 +215,9 @@ static void rings_wide_observe(CPU *c) {
         w->pending=w->zoom_pending=w->valid=w->zoom_valid=0;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
         w->hero.valid=0;
+        if(rings_scene_battle(c)) {
+            w->native.valid=0;w->native_pending=0;return;
+        }
         /* Replay precisely the original 10x10 traversal. Never extend a
            room/combat map and wrap its tiles beyond the room's walls. */
         if(c->pc==0x1b950 && (c->ram[0x98] || c->ram[0x99])) {
