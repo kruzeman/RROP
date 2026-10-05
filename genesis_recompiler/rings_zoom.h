@@ -16,6 +16,24 @@ static const uint8_t *rings_view_pixels(const VDP *v,int external_font) {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
 static int rings_wide_resource_shifted(CPU *c,uint8_t *out,unsigned width,unsigned height,
                                       unsigned id,int x,int y,int flipped,int shift,int dx,int dy);
+static int rings_wide_resource_layer(CPU *c,uint8_t *out,unsigned width,unsigned height,
+                                    unsigned id,int x,int y,int flipped,int shift,int dx,int dy,
+                                    uint8_t *lift,int ground,int actor);
+static int rings_hero_pixels(CPU *c,const VDP *v,int dx,int dy,uint8_t *out,uint8_t *lift) {
+    if(!c || !c->wide || !c->wide->shadow || !v->hero_patch.valid)return 0;
+    CPU *shadow=c->wide->shadow;shadow->fault=0;
+    memset(out,0,RINGS_HERO_WIDTH*RINGS_HERO_HEIGHT);
+    memset(lift,0,RINGS_HERO_WIDTH*RINGS_HERO_HEIGHT);
+    for(unsigned i=0;i<v->hero_patch.count;++i) {
+        const RingsNativeDraw *d=&v->hero_patch.draw[i];
+        int mx=d->hero ? dx:0,my=d->hero ? dy:0;
+        int ground=d->ground+(d->actor ? -RINGS_HERO_TOP+my:0);
+        if(!rings_wide_resource_layer(shadow,out,RINGS_HERO_WIDTH,RINGS_HERO_HEIGHT,
+                d->id,d->x,d->y+RINGS_ZOOM_TOP,d->flipped,-RINGS_HERO_LEFT,
+                mx,-RINGS_ZOOM_TOP-RINGS_HERO_TOP+my,lift,ground,d->actor))return 0;
+    }
+    return 1;
+}
 static int rings_native_pixels(CPU *c,const VDP *v,int dx,int dy,uint8_t *out) {
     if(!c->wide || !c->wide->shadow || !v->native_motion.valid)return 0;
     CPU *shadow=c->wide->shadow;
@@ -41,7 +59,7 @@ static void rings_zoom_prepare(CPU *c,const uint8_t *sprites) {
     int native=0;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     native=v->native_scene && v->native_motion.valid && rings_bitmap_visible(c);
-    if(v->zoom_world_visible)v->camera=w->camera;
+    if(v->zoom_world_visible) {v->camera=w->camera;v->hero_patch=w->hero;}
     else if(!native) {v->camera.valid=0;v->native_motion.valid=0;}
 #endif
     if(!v->zoom_world_visible && !native)return;
@@ -109,16 +127,20 @@ static int rings_zoom_project(int pixel,int anchor,unsigned percent) {
 /* Only an elevated pixel whose ground projection lies in the aperture may
    spill over its upper edge. Use the frozen ground mask at the current scale;
    the old 100% silhouettes never determine the new object's outline. */
-static int rings_zoom_spill_shift(const VDP *v,int sx,int sy,unsigned percent,int shift_x,int shift_y) {
+static int rings_zoom_spill_layer(const VDP *v,const uint8_t *scene,const uint8_t *lift,
+                                 int sx,int sy,unsigned percent,int shift_x,int shift_y) {
     if(rings_view_wide(v) || sx<0 || sx>=RINGS_ZOOM_WIDTH || sy<0 || sy>=RINGS_ZOOM_HEIGHT)return 0;
     unsigned p=(unsigned)sy*RINGS_ZOOM_WIDTH+(unsigned)sx;
-    if(!v->zoom_lift[p] || !v->zoom_scene[p])return 0;
+    if(!lift[p] || !scene[p])return 0;
     int target_x=(int)v->zoom_focus_x-RINGS_ZOOM_LEFT-24;
     int target_y=(int)v->zoom_focus_y-RINGS_ZOOM_TOP;
     int gx=target_x+rings_zoom_project(sx,v->zoom_focus_x,percent)+shift_x;
-    int gy=target_y+rings_zoom_project(sy+v->zoom_lift[p],v->zoom_focus_y,percent)+shift_y;
+    int gy=target_y+rings_zoom_project(sy+lift[p],v->zoom_focus_y,percent)+shift_y;
     return gx>=0 && gx<(int)v->frame_width && gy>=0 && gy<(int)v->frame_height &&
            v->zoom_mask[(unsigned)gy*v->frame_width+(unsigned)gx];
+}
+static int rings_zoom_spill_shift(const VDP *v,int sx,int sy,unsigned percent,int shift_x,int shift_y) {
+    return rings_zoom_spill_layer(v,v->zoom_scene,v->zoom_lift,sx,sy,percent,shift_x,shift_y);
 }
 static int rings_zoom_spill(const VDP *v,int sx,int sy,unsigned percent) {
     return rings_zoom_spill_shift(v,sx,sy,percent,0,0);

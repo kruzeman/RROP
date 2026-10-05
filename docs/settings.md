@@ -13,7 +13,7 @@ Saves remain available. **Mode: Enhanced** exposes these options:
 | --- | --- |
 | Widescreen | Expanded outdoor world; HUD displayed over it |
 | Fullscreen | Desktop fullscreen |
-| Smooth map | Interpolated camera scrolling, including interiors; indoor hero motion |
+| Smooth map | Interpolated camera and hero motion outdoors and in interiors |
 | Zoom | Mouse-wheel zoom between 50% and 100% |
 | Mouse controls | Left-button movement; right-button native automatic walking |
 | Control settings | Placeholder for future key/gamepad configuration |
@@ -24,7 +24,7 @@ autosave timer pause while the host menu is open.
 
 Interiors and battles retain the original viewport and 100% zoom, even in
 Enhanced mode. The selected outdoor zoom returns on leaving those scenes.
-[Native motion](native-motion.md) describes indoor camera and hero smoothing.
+[Camera and hero motion](native-motion.md) describes smoothing outdoors and indoors.
 Zoom does not change the game's simulation speed. Smooth scrolling is a
 presentation feature; the native game still updates its decisions at its own rate.
 

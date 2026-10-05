@@ -43,7 +43,11 @@ of translated dialogue strings. `rings_camera*` interpolates visual map motion;
 it does not accelerate game logic. Native scenes capture a bounded list of draw
 calls from the original 10×10 traversal, commit it after bitmap upload, and
 replay the resource writers with a finite hero offset for presentation. The
-hero and shadow keep the last submitted scene's draw order. Derived motion
+hero and shadow keep the last submitted scene's draw order. Outdoor redraws
+also capture a bounded command patch around the hero from the expanded traversal.
+Host interpolation replays that patch with matching ground ownership, while
+keeping the rest of the frozen world bitmap. Mouse picking and the elevated
+spill texture use the same displayed position and updated lift pixels. Derived motion
 records and host tweens are omitted from save files. `rings_mouse*` submits directional movement
 and native A + direction requests rather than implementing independent pathfinding.
 

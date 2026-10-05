@@ -45,7 +45,8 @@ static uint8_t rings_mouse_direction(SDLHost *h,const CPU *c) {
     double hx=(int)v->zoom_focus_x-RINGS_ZOOM_LEFT+16-(rings_view_wide(v) ? 0:40);
     double hy=(int)v->zoom_focus_y-RINGS_ZOOM_TOP;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
-    hx+=h->camera.x;hy+=h->camera.y;
+    hx+=h->camera.x+h->camera.hero_x*h->zoom_percent/100.0;
+    hy+=h->camera.y+h->camera.hero_y*h->zoom_percent/100.0;
 #endif
     double dx=x-hx,dy=y-hy;
     if(dx*dx+dy*dy<=64)return 0; /* Eight native pixels around the ground anchor. */

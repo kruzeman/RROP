@@ -33,6 +33,7 @@ static void rings_scene_discard(CPU *c) {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     c->wide->camera.valid=0;c->wide->camera_work.valid=0;
     c->wide->native.valid=0;c->wide->native_pending=0;
+    c->wide->hero.valid=0;
 #endif
 }
 static void rings_scene_snapshot(CPU *c) {
@@ -42,6 +43,7 @@ static void rings_scene_snapshot(CPU *c) {
     v->native_scene=(uint8_t)rings_scene_native(c);
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     v->native_motion.valid=0;
+    v->hero_patch.valid=0;
 #endif
     if(!v->native_scene)return;
     v->wide_world_visible=0;v->zoom_world_visible=0;v->wide_hud_active=0;

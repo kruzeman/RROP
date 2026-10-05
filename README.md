@@ -24,7 +24,7 @@ The project focuses on one verified game revision, with optional improvements:
 
 Classic presentation remains selectable. Interiors and battles use the original
 viewport at 100% zoom to avoid repeating fixed scenes outside their boundaries.
-This branch also adds [indoor camera and hero smoothing](docs/native-motion.md).
+This branch also adds [camera and hero smoothing outdoors and indoors](docs/native-motion.md).
 
 ## Screenshots
 

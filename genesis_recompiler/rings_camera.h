@@ -37,18 +37,21 @@ static void rings_camera_evaluate(RingsCameraTween *t,uint64_t now) {
 }
 static void rings_camera_update(RingsCameraTween *t,const VDP *v,uint64_t now,unsigned hz,unsigned percent) {
     int native=v->native_scene && v->native_motion.valid;
+    int hero_valid=native ? v->native_motion.hero_valid:v->hero_patch.valid && v->hero_patch.hero_valid;
+    int32_t hx=(native ? v->native_motion.hero_x:v->hero_patch.hero_x)+v->camera.x;
+    int32_t hy=(native ? v->native_motion.hero_y:v->hero_patch.hero_y)+v->camera.y;
     if(native)percent=100;
     if(!t->enabled || (!v->zoom_world_visible && !native) || !v->camera.valid || !hz) {
         rings_camera_reset(t);t->now=now;return;
     }
     if(t->ready && (now<t->now || t->native!=native || t->wide!=rings_view_wide(v) || t->percent!=percent))rings_camera_reset(t);
     t->now=now;rings_camera_evaluate(t,now);
+    if(!hero_valid) {t->hero_ready=t->hero_active=0;t->hero_x=t->hero_y=0;}
     if(!t->ready) {
         t->scene=v->camera;t->focus_x=v->zoom_focus_x;t->focus_y=v->zoom_focus_y;
         t->percent=percent;t->wide=rings_view_wide(v);t->native=native;t->ready=1;
-        if(native && v->native_motion.hero_valid) {
-            t->hero_world_x=v->native_motion.hero_x+v->camera.x;
-            t->hero_world_y=v->native_motion.hero_y+v->camera.y;t->hero_ready=1;
+        if(hero_valid) {
+            t->hero_world_x=hx;t->hero_world_y=hy;t->hero_ready=1;
         }
         return;
     }
@@ -62,10 +65,9 @@ static void rings_camera_update(RingsCameraTween *t,const VDP *v,uint64_t now,un
         rings_camera_abs((double)v->zoom_focus_x-t->focus_x)<=48 &&
         rings_camera_abs((double)v->zoom_focus_y-t->focus_y)<=48;
     t->scene=v->camera;t->focus_x=v->zoom_focus_x;t->focus_y=v->zoom_focus_y;
-    if(native) {
-        int32_t hx=v->native_motion.hero_x+v->camera.x,hy=v->native_motion.hero_y+v->camera.y;
+    if(hero_valid) {
         int hx_delta=hx-t->hero_world_x,hy_delta=hy-t->hero_world_y;
-        int hero_continuous=continuous && t->hero_ready && v->native_motion.hero_valid &&
+        int hero_continuous=continuous && t->hero_ready &&
             rings_camera_abs(hx_delta)<=56 && rings_camera_abs(hy_delta)<=32;
         if(!hero_continuous) {t->hero_x=t->hero_y=0;t->hero_active=0;}
         else if(hx_delta || hy_delta) {
@@ -76,8 +78,13 @@ static void rings_camera_update(RingsCameraTween *t,const VDP *v,uint64_t now,un
             t->hero_span=(uint64_t)hz*(t->duration_ms ? t->duration_ms:200)/1000;
             if(!t->hero_span)t->hero_span=1;
             t->hero_active=1;
+            /* Fast-forward can outpace a finite patch. Snap to the accepted
+               position rather than queueing a long visual walk off its edge. */
+            if(rings_camera_abs(t->hero_x)>64 || rings_camera_abs(t->hero_y)>48) {
+                t->hero_x=t->hero_y=0;t->hero_active=0;
+            }
         }
-        t->hero_world_x=hx;t->hero_world_y=hy;t->hero_ready=v->native_motion.hero_valid;
+        t->hero_world_x=hx;t->hero_world_y=hy;t->hero_ready=1;
     }
     if(!continuous) {t->x=t->y=0;t->active=0;return;}
     if(!dx && !dy)return;

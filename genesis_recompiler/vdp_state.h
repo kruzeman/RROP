@@ -29,6 +29,7 @@ typedef struct {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     RingsCameraSnapshot camera;
     RingsNativeMotion native_motion;
+    RingsHeroPatch hero_patch;
 #endif
     uint8_t wide_hud_active;
     uint8_t native_scene; /* Derived frame policy, not a saved user preference. */

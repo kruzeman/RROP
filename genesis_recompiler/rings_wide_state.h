@@ -11,7 +11,9 @@ typedef struct {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     RingsCameraSnapshot camera_work,camera;
     RingsNativeMotion native_work,native;
+    RingsHeroPatch hero_work,hero;
     uint8_t native_pending;
+    uint8_t primary_hero;
 #endif
     uint8_t work[RINGS_WIDE_FIELD*RINGS_SCENE_HEIGHT];
     uint8_t scene[RINGS_WIDE_FIELD*RINGS_SCENE_HEIGHT];

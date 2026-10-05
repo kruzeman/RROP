@@ -35,6 +35,9 @@ typedef struct {
     int spill_x,spill_y,last_smooth;
     int native_actor_x,native_actor_y;
     uint8_t *native_pixels;
+    uint8_t *hero_pixels,*motion_lift;
+    uint64_t actor_frame;
+    int actor_scene;
 #endif
 #ifdef GENESIS_RINGS_WIDE
     RingsMouse mouse;
@@ -53,6 +56,8 @@ static unsigned sdl_host_scene_percent(const SDLHost *h,const VDP *v) {
 static void sdl_host_close(SDLHost *h) {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     free(h->native_pixels);h->native_pixels=NULL;
+    free(h->hero_pixels);h->hero_pixels=NULL;
+    free(h->motion_lift);h->motion_lift=NULL;
 #endif
 #ifdef GENESIS_RINGS_SAVES
     SDL_DestroyTexture(h->settings.paper_texture);
@@ -155,27 +160,53 @@ static void sdl_host_rebase(SDLHost *h, const CPU *c) {
    The UI mask is a separate native-resolution layer, never zoomed. */
 static int sdl_host_spill_upload(SDLHost *h,const VDP *v) {
     int dx=0,dy=0;
+    const uint8_t *scene=v->zoom_scene,*lift=v->zoom_lift;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     dx=rings_camera_round(h->camera.x);dy=rings_camera_round(h->camera.y);
     h->spill_x=dx;h->spill_y=dy;
+    if(h->actor_scene && h->actor_frame==v->rendered_frames) {
+        scene=h->native_pixels;
+        if(!v->native_scene)lift=h->motion_lift;
+    }
 #endif
     for(unsigned y=0;y<RINGS_ZOOM_HEIGHT;++y)for(unsigned x=0;x<RINGS_ZOOM_WIDTH;++x) {
-        unsigned p=y*RINGS_ZOOM_WIDTH+x,ink=v->zoom_scene[p];uint8_t *out=h->zoom_pixels+p*4;
+        unsigned p=y*RINGS_ZOOM_WIDTH+x,ink=scene[p];uint8_t *out=h->zoom_pixels+p*4;
         memcpy(out,v->zoom_palette+ink*3,3);
-        out[3]=rings_zoom_spill_shift(v,(int)x,(int)y,sdl_host_scene_percent(h,v),dx,dy) ? 255:0;
+        out[3]=rings_zoom_spill_layer(v,scene,lift,(int)x,(int)y,sdl_host_scene_percent(h,v),dx,dy) ? 255:0;
     }
     return SDL_UpdateTexture(h->zoom_spill,NULL,h->zoom_pixels,RINGS_ZOOM_WIDTH*4) ? sdl_host_error(h,"zoom elevated upload failed"):1;
 }
 static int sdl_host_zoom_upload(SDLHost *h,CPU *c,const VDP *v,const uint8_t *base) {
     const uint8_t *scene=v->zoom_scene;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
+    h->actor_scene=0;h->actor_frame=v->rendered_frames;
+    h->native_actor_x=rings_camera_round(h->camera.hero_x);h->native_actor_y=rings_camera_round(h->camera.hero_y);
     if(v->native_scene && v->native_motion.valid) {
         if(!h->native_pixels)h->native_pixels=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
         if(!h->native_pixels)return sdl_host_error(h,"native motion allocation failed");
-        h->native_actor_x=rings_camera_round(h->camera.hero_x);h->native_actor_y=rings_camera_round(h->camera.hero_y);
         if(!rings_native_pixels(c,v,h->native_actor_x,h->native_actor_y,h->native_pixels))
             return sdl_host_error(h,"native motion resource rendering failed");
-        scene=h->native_pixels;
+        scene=h->native_pixels;h->actor_scene=1;
+    } else if(h->camera.enabled && v->hero_patch.valid &&
+              (h->native_actor_x || h->native_actor_y || h->camera.hero_active)) {
+        if(!h->native_pixels)h->native_pixels=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
+        if(!h->motion_lift)h->motion_lift=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
+        if(!h->hero_pixels)h->hero_pixels=malloc(RINGS_HERO_WIDTH*RINGS_HERO_HEIGHT*2);
+        if(!h->native_pixels || !h->motion_lift || !h->hero_pixels)return sdl_host_error(h,"outdoor motion allocation failed");
+        uint8_t *patch_lift=h->hero_pixels+RINGS_HERO_WIDTH*RINGS_HERO_HEIGHT;
+        if(!rings_hero_pixels(c,v,h->native_actor_x,h->native_actor_y,h->hero_pixels,patch_lift))
+            return sdl_host_error(h,"outdoor motion resource rendering failed");
+        memcpy(h->native_pixels,v->zoom_scene,RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
+        memcpy(h->motion_lift,v->zoom_lift,RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
+        /* Scenery, actors and ground ownership share the same overwritten
+           region: the old hero and its former spill outline disappear. */
+        unsigned left=RINGS_ZOOM_LEFT+40+RINGS_HERO_LEFT,top=RINGS_ZOOM_TOP+RINGS_HERO_TOP;
+        for(unsigned y=0;y<RINGS_HERO_HEIGHT;++y) {
+            unsigned dst=(top+y)*RINGS_ZOOM_WIDTH+left,src=y*RINGS_HERO_WIDTH;
+            memcpy(h->native_pixels+dst,h->hero_pixels+src,RINGS_HERO_WIDTH);
+            memcpy(h->motion_lift+dst,patch_lift+src,RINGS_HERO_WIDTH);
+        }
+        scene=h->native_pixels;h->actor_scene=1;
     }
 #else
     (void)c;
@@ -315,7 +346,8 @@ static int sdl_host_draw(SDLHost *h, const VDP *v) {
     zoom_active|=h->camera.enabled && v->zoom_world_visible && v->camera.valid;
     int native_active=h->console && h->camera.enabled && v->native_scene && v->native_motion.valid && v->camera.valid;
     zoom_active|=native_active;
-    upload|=native_active && (h->native_actor_x!=rings_camera_round(h->camera.hero_x) ||
+    int actor_active=h->console && h->camera.enabled && (native_active || v->hero_patch.valid) && v->camera.valid;
+    upload|=actor_active && (h->native_actor_x!=rings_camera_round(h->camera.hero_x) ||
                             h->native_actor_y!=rings_camera_round(h->camera.hero_y));
     upload|=h->last_smooth!=zoom_active;h->last_smooth=zoom_active;
 #endif
