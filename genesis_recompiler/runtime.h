@@ -564,7 +564,10 @@ static int run_main(int argc, char **argv, const uint8_t *rom, size_t size, int 
         audio_finish(&c);return 1;
     }
 #ifdef GENESIS_SDL2
-    if(window && saves.loaded)rings_save_host_loaded(&host,&c);
+    if(window) {
+        if(saves.loaded)rings_save_host_loaded(&host,&c);
+        else rings_startup_init(&host,&c);
+    }
 #endif
     uint64_t run_steps=0;
     while(run_steps<limit) {
@@ -606,6 +609,9 @@ static int run_main(int argc, char **argv, const uint8_t *rom, size_t size, int 
         if (trace) fprintf(stderr,"step=%" PRIu64 " pc=%06" PRIx32 " sr=%04x D0=%08" PRIx32 " A7=%08" PRIx32 "\n",c.steps,c.pc,c.sr,c.d[0],c.a[7]);
 #ifdef GENESIS_RINGS_SAVES
         uint64_t before_steps=c.steps;
+#endif
+#if defined(GENESIS_RINGS_SAVES) && defined(GENESIS_SDL2)
+        if(window)rings_startup_observe(&host,&c);
 #endif
         machine_step(&c);
 #ifdef GENESIS_RINGS_SAVES

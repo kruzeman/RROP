@@ -17,6 +17,7 @@ typedef struct {
 #ifdef GENESIS_RINGS_SAVES
     RingsSaves *saves;
     RingsSettings settings;
+    uint8_t startup_held,startup_latched,startup_armed,startup_injected,startup_previous,startup_focused;
 #endif
 #ifdef GENESIS_RINGS_MENU_FONT
     RingsFont font;
@@ -47,6 +48,7 @@ typedef struct {
     unsigned zoom_width,zoom_height;
 #endif
 } SDLHost;
+#include "rings_startup_sdl.h"
 #ifdef GENESIS_RINGS_WIDE
 static unsigned sdl_host_scene_percent(const SDLHost *h,const VDP *v) {
     return v->native_scene ? 100:h->zoom_percent;
@@ -444,6 +446,9 @@ static int sdl_host_service(SDLHost *h, CPU *c) {
     while (SDL_PollEvent(&event)) {
         if (event.type==SDL_QUIT) return 0;
 #ifdef GENESIS_RINGS_SAVES
+        rings_startup_event(h,&event);
+#endif
+#ifdef GENESIS_RINGS_SAVES
         if(rings_settings_event(h,c,&event)) {redraw=1;continue;}
 #endif
 #ifdef GENESIS_RINGS_WIDE
@@ -521,6 +526,7 @@ static int sdl_host_service(SDLHost *h, CPU *c) {
         }
     }
 #ifdef GENESIS_RINGS_SAVES
+    rings_startup_keyboard(h);
     if(h->saves) {
         uint64_t previous_notice=h->saves->notice_until;
         rings_save_tick(h->saves,c,rings_save_now(h),!h->paused && !h->stopped && !c->fault && !h->saves->menu && !h->settings.menu);

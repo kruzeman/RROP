@@ -91,6 +91,7 @@ static void rings_save_overlay(SDLHost *h,const VDP *v) {
     SDL_SetRenderDrawBlendMode(h->renderer,SDL_BLENDMODE_NONE);SDL_SetRenderDrawColor(h->renderer,0,0,0,255);
 }
 static void rings_save_host_loaded(SDLHost *h,CPU *c) {
+    rings_startup_cancel(h,c);
     if(h->settings.ready) {c->ram[0x132]=0;c->ram[0x133]=(uint8_t)h->settings.help;}
 #ifdef GENESIS_RINGS_WIDE
     rings_mouse_reset(&h->mouse);
