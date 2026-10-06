@@ -141,7 +141,10 @@ int main(void) {
   unsigned ux=(unsigned)(left+(84+wide*40)*scale),uy=(unsigned)(top+44*scale);
   for(unsigned y=uy;y<uy+4;++y)for(unsigned x=ux;x<ux+4;++x)
    assert(!memcmp(before+(y*width+x)*3,after+(y*width+x)*3,3));
-  assert(memcmp(before,after,width*height*3));
+  /* An unavailable original traversal at classic 100% must fall back to
+     the original frame, rather than display a crop of the expanded map. */
+  if(wide || percent!=100)assert(memcmp(before,after,width*height*3));
+  else assert(!h.last_smooth && !memcmp(before,after,width*height*3));
   c->master_cycles+=vdp_master_frequency(&c->vdp)/5;vdp_render(c);assert(sdl_host_service(&h,c));
   assert(!h.camera.active && !h.camera.x);
  }

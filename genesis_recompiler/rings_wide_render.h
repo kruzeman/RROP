@@ -7,6 +7,13 @@ static int rings_wide_rom(CPU *c,unsigned at,unsigned *byte) {
     if(at>=0x100000)return 0;
     *byte=read_mem(c,at,1);return !c->fault;
 }
+static uint8_t rings_resource_lift(int distance,unsigned row,int column,int terrain) {
+    if(terrain && column>=0 && column<28) {
+        int edge=7+(column<14 ? 13-column:column-14)/2;
+        if((int)row<edge)distance+=edge-(int)row;
+    }
+    return (uint8_t)(distance<0 ? 0:distance>255 ? 255:distance);
+}
 /* Each resource row has a byte-count/left-skip header and packed 4bpp pixels.
    Zero nibbles are transparent; the mirrored writer reverses bytes/nibbles. */
 static int rings_wide_resource_layer(CPU *c,uint8_t *out,unsigned width,unsigned height,
@@ -34,15 +41,17 @@ static int rings_wide_resource_layer(CPU *c,uint8_t *out,unsigned width,unsigned
             int xx=left+(flipped ? -(int)i*2:(int)i*2);
             unsigned hi=flipped ? byte&15:byte>>4,lo=flipped ? byte>>4:byte&15;
             if(y>=0 && y<(int)height) {
-                int distance=lift ? ground-(actor ? y:0):0;
-                uint8_t elevation=(uint8_t)(distance<0 ? 0:distance>255 ? 255:distance);
+                int distance=lift ? ground-(actor==1 ? y:0):0;
                 if(xx>=0 && xx<(int)width && hi) {
                     unsigned p=(unsigned)y*width+(unsigned)xx;out[p]=(uint8_t)hi;
-                    if(lift)lift[p]=elevation;
+                    /* Terrain's 28x16 footprint starts seven rows below
+                       the writer origin. Include intrinsic roof/tree lift
+                       even when the map tile itself is at elevation zero. */
+                    if(lift)lift[p]=rings_resource_lift(distance,row,xx-(x+shift-64),actor==2);
                 }
                 if(xx+1>=0 && xx+1<(int)width && lo) {
                     unsigned p=(unsigned)y*width+(unsigned)(xx+1);out[p]=(uint8_t)lo;
-                    if(lift)lift[p]=elevation;
+                    if(lift)lift[p]=rings_resource_lift(distance,row,xx+1-(x+shift-64),actor==2);
                 }
             }
         }
@@ -123,8 +132,8 @@ static int rings_wide_replay(CPU *source,unsigned grid) {
             int x=(int16_t)read_mem(c,c->a[7]+6,2),y=(int16_t)read_mem(c,c->a[7]+8,2);
             int flipped=!!read_mem(c,c->a[7]+10,2);
             unsigned caller=read_mem(c,c->a[7],4)&0xffffff;
-            w->resource_actor=(uint8_t)(caller!=0x1bc20 && caller!=0x1bc42 && caller!=0x1bc8a);
-            w->resource_ground=w->resource_actor ? w->tile_ground_y+top+20:w->tile_ground_y-y;
+            w->resource_actor=(uint8_t)((caller!=0x1bc20 && caller!=0x1bc42 && caller!=0x1bc8a) ? 1:2);
+            w->resource_ground=w->resource_actor==1 ? w->tile_ground_y+top+20:w->tile_ground_y-y;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
             if(grid==10) {
                 RingsNativeMotion *m=&w->native_work;
@@ -153,7 +162,7 @@ static int rings_wide_replay(CPU *source,unsigned grid) {
                         d->id=(uint16_t)id;d->x=(int16_t)x;d->y=(int16_t)y;
                         d->flipped=(uint8_t)flipped;d->hero=w->primary_hero && w->tracking_hero;
                         d->actor=w->resource_actor;
-                        d->ground=(int16_t)(w->resource_ground-(d->actor ? top:0));
+                        d->ground=(int16_t)(w->resource_ground-(d->actor==1 ? top:0));
                     } else m->overflow=1;
                 }
             }
@@ -239,7 +248,19 @@ static void rings_wide_observe(CPU *c) {
         return;
     }
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
-    w->native.valid=0;w->native_pending=0;
+    /* Classic 100% smoothing must use the actual 10x10 traversal. A crop
+       of the expanded map has different boundary cliffs and lets outside
+       tiles overpaint the original silhouettes. Keep a separate snapshot. */
+    if(c->pc==0x1b950) {
+        w->native_pending=0;
+        if(!c->vdp.wide_enabled && (c->ram[0x98] || c->ram[0x99])) {
+            memset(&w->native_work,0,sizeof w->native_work);
+            w->native_work.camera=rings_camera_capture(c);
+            w->native_pending=(uint8_t)rings_wide_replay(c,10);
+            if(!w->native_pending)w->native.valid=0;
+        }
+        else if(c->vdp.wide_enabled)w->native.valid=0;
+    }
 #endif
     if(c->pc==0x1b950 && (c->ram[0x98] || c->ram[0x99])) {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
@@ -271,6 +292,11 @@ static void rings_wide_observe(CPU *c) {
         ++w->scenes;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
         w->camera=w->camera_work;w->camera.generation=w->scenes;w->camera.clocks=c->master_cycles;
+        if(w->native_pending) {
+            w->native_pending=0;w->native=w->native_work;
+            w->native.valid=(uint8_t)(w->native.camera.valid && !w->native.overflow && w->native.count);
+            w->native.camera=w->camera;
+        }
 #endif
     }
 }

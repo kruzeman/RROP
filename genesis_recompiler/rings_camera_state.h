@@ -16,7 +16,7 @@ typedef struct {
     int16_t x,y;
     uint8_t flipped,hero;
     int16_t ground;
-    uint8_t actor;
+    uint8_t actor; /* 0: unclassified, 1: actor, 2: isometric terrain. */
 } RingsNativeDraw;
 typedef struct {
     RingsCameraSnapshot camera;

@@ -154,9 +154,8 @@ for(unsigned wide=0;wide<2;++wide)for(unsigned percent=50;percent<=100;percent+=
 VDP *v=&c->vdp;vdp_render(c);assert(v->native_motion.valid);
 unsigned p=(80+RINGS_ZOOM_TOP)*RINGS_ZOOM_WIDTH+160+RINGS_ZOOM_LEFT+24;
 assert(v->zoom_scene[p]==2 && v->zoom_lift[p]==32);
-assert(v->zoom_mask[80*320+160] && v->zoom_restore[80*320+160]);
-/* Elevation is also retained for a masked spill layer and actor offsets. */
-v->zoom_mask[80*320+160]=0;
+assert(!v->zoom_mask[80*320+160] && v->zoom_restore[80*320+160]);
+/* The ground opening remains masked; elevation is a separate spill layer. */
 assert(rings_zoom_spill(v,480,340,100));
 uint8_t *pixels=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT),*lift=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
 assert(pixels&&lift);assert(rings_native_pixels(c,v,14,8,pixels,lift));
@@ -182,6 +181,31 @@ context(c,0xb0ac,0,2);assert(!rings_scene_battle(c));
 context(c,0xb09c,0,2);assert(!rings_scene_battle(c));
 ''')
 
+    def test_terrain_footprint_separates_flat_floor_from_roof_and_tree_pixels(self):
+        self.check(r'''
+/* Every pixel of the flat 28x16 diamond has zero intrinsic lift.
+   A tree/roof above its sloping top has positive lift, in either mirror. */
+for(int col=0;col<28;++col) {
+ int edge=7+(col<14 ? 13-col:col-14)/2;
+ for(unsigned row=(unsigned)edge;row<22;++row)
+  assert(!rings_resource_lift(0,row,col,1));
+ assert(rings_resource_lift(0,(unsigned)(edge-1),col,1)==1);
+ assert(rings_resource_lift(14,(unsigned)(edge-1),col,1)==15);
+ assert(rings_resource_lift(0,0,col,1)==rings_resource_lift(0,0,27-col,1));
+}
+assert(!rings_resource_lift(0,0,13,0)); /* Unclassified writers remain unchanged. */
+''')
+
+    def test_outdoor_original_snapshot_survives_a_redraw_with_no_new_bitmap(self):
+        self.check(r'''
+context(c,0xb08c,1,1);w->native.camera=rings_camera_capture(c);w->camera=w->native.camera;
+c->ram[0x98]=c->ram[0x99]=0;c->pc=0x1b950;
+rings_wide_observe(c);assert(w->native.valid && !w->native_pending && !w->failures);
+vdp_render(c);assert(c->vdp.native_motion.valid && c->vdp.native_motion.count==1);
+/* Expanded presentation uses its own cache and never a previous native room. */
+c->vdp.wide_enabled=1;rings_wide_observe(c);assert(!w->native.valid);
+''')
+
 
 class RingsNativeMotionSDLTests(CompiledTestCase):
     @classmethod
@@ -193,7 +217,10 @@ class RingsNativeMotionSDLTests(CompiledTestCase):
 int main(void) {
  CPU *c=calloc(1,sizeof *c);RingsWide *w=calloc(1,sizeof *w);assert(c&&w);native_scene(c,w);
  SDLHost h={0};h.no_throttle=1;h.camera.enabled=1;h.zoom_percent=50;assert(sdl_host_open(&h));
- vdp_render(c);assert(sdl_host_service(&h,c));assert(h.camera.native && h.actor_scene);
+ vdp_render(c);assert(sdl_host_service(&h,c));assert(h.camera.native && !h.last_smooth);
+ /* Settled 100% uses the actual original frame. Exercise the resource
+    layers during interpolation, even when its current offset is zero. */
+ h.camera.active=1;assert(sdl_host_draw(&h,&c->vdp));assert(h.actor_scene);
  int width,height;assert(!SDL_GetRendererOutputSize(h.renderer,&width,&height));
  uint8_t *pixels=malloc(width*height*3),*off=malloc(width*height*3);assert(pixels&&off);
  assert(!SDL_RenderReadPixels(h.renderer,NULL,SDL_PIXELFORMAT_RGB24,pixels,width*3));
@@ -226,4 +253,53 @@ int main(void) {
         self.assertEqual(result.returncode,0,result.stderr)
         result = subprocess.run([str(binary)],env=dict(os.environ,SDL_VIDEODRIVER='dummy',SDL_RENDER_DRIVER='software'),
                                 capture_output=True,text=True,timeout=20)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_classic_motion_uses_original_cells_and_keeps_floor_inside_aperture(self):
+        source=motion_source()+r'''
+int main(void) {
+ CPU *c=calloc(1,sizeof *c);RingsWide *w=calloc(1,sizeof *w);assert(c&&w);native_scene(c,w);
+ SDLHost h={0};h.no_throttle=1;h.camera.enabled=1;h.zoom_percent=100;assert(sdl_host_open(&h));h.console=c;
+ int width,height;assert(!SDL_GetRendererOutputSize(h.renderer,&width,&height));
+ uint8_t *on=malloc(width*height*3),*off=malloc(width*height*3);assert(on&&off);
+ for(unsigned outdoor=0;outdoor<2;++outdoor) {
+  context(c,outdoor ? 0xb08c:0xb09c,outdoor, outdoor ? 1:2);
+  w->native.camera=rings_camera_capture(c);w->native.camera.generation++;
+  w->camera=w->native.camera;
+  w->native.count=2;w->native.draw[1]=w->native.draw[0];
+  RingsNativeDraw *floor=&w->native.draw[1];
+  floor->id=1;floor->x=212;floor->actor=floor->hero=0;floor->ground=0;
+  /* An expanded outside tile would overwrite the accepted actor in blue. */
+  memset(w->zoom_scene,3,sizeof w->zoom_scene);w->valid=w->zoom_valid=1;
+  vdp_render(c);assert(c->vdp.native_motion.valid);
+  assert(!c->vdp.zoom_mask[80*320+160]);
+  h.camera=(RingsCameraTween){0};h.camera.enabled=1;h.last_frame=UINT64_MAX;
+  assert(sdl_host_draw(&h,&c->vdp));assert(!h.last_smooth);
+  assert(!SDL_RenderReadPixels(h.renderer,NULL,SDL_PIXELFORMAT_RGB24,on,width*3));
+  h.camera.enabled=0;assert(sdl_host_draw(&h,&c->vdp));
+  assert(!SDL_RenderReadPixels(h.renderer,NULL,SDL_PIXELFORMAT_RGB24,off,width*3));
+  assert(!memcmp(on,off,width*height*3));
+  h.camera.enabled=h.camera.active=1;assert(sdl_host_draw(&h,&c->vdp));assert(h.actor_scene);
+  assert(!SDL_RenderReadPixels(h.renderer,NULL,SDL_PIXELFORMAT_RGB24,on,width*3));
+  double scale=(double)width/320;if((double)height/224<scale)scale=(double)height/224;
+  unsigned left=(width-(int)(320*scale))/2,top=(height-(int)(224*scale))/2;
+  unsigned p=((top+(unsigned)(81*scale))*width+left+(unsigned)(161*scale))*3;
+  assert(!on[p] && on[p+1]==255 && !on[p+2]); /* Actor spills over frame. */
+  p=((top+(unsigned)(81*scale))*width+left+(unsigned)(165*scale))*3;
+  assert(on[p]==255 && on[p+1]==255 && on[p+2]==255); /* Floor stays masked. */
+  h.camera.x=1;assert(sdl_host_draw(&h,&c->vdp));
+  assert(!SDL_RenderReadPixels(h.renderer,NULL,SDL_PIXELFORMAT_RGB24,on,width*3));
+  p=((top+(unsigned)(81*scale))*width+left+(unsigned)(166*scale))*3;
+  assert(on[p]==255 && on[p+1]==255 && on[p+2]==255);
+ }
+ free(off);free(on);sdl_host_close(&h);free(w->shadow);free(w);free(c);return 0;
+}
+'''
+        path=self.root/'aperture.c';path.write_text(source);binary=self.root/'aperture'
+        result=subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function',
+                               '-DGENESIS_SDL2',*self.flags,str(path),'-o',str(binary),*self.libs],
+                              capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        env=dict(os.environ,SDL_VIDEODRIVER='dummy',SDL_RENDER_DRIVER='software')
+        result=subprocess.run([str(binary)],env=env,capture_output=True,text=True,timeout=20)
         self.assertEqual(result.returncode,0,result.stderr)

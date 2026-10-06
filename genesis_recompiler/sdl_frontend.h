@@ -172,7 +172,16 @@ static int sdl_host_spill_upload(SDLHost *h,const VDP *v) {
     for(unsigned y=0;y<RINGS_ZOOM_HEIGHT;++y)for(unsigned x=0;x<RINGS_ZOOM_WIDTH;++x) {
         unsigned p=y*RINGS_ZOOM_WIDTH+x,ink=scene[p];uint8_t *out=h->zoom_pixels+p*4;
         memcpy(out,v->zoom_palette+ink*3,3);
-        out[3]=rings_zoom_spill_layer(v,scene,lift,(int)x,(int)y,sdl_host_scene_percent(h,v),dx,dy) ? 255:0;
+        int accepted=0;
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+        /* The native traversal has already selected the accepted cells.
+           Do not clip their roofs, trees or actors a second time by their
+           pixel ground projection; flat floor still stays behind the UI. */
+        accepted=h->actor_scene && !rings_view_wide(v) &&
+                 sdl_host_scene_percent(h,v)==100 && v->native_motion.valid;
+#endif
+        out[3]=(accepted ? ink && lift[p]:
+            rings_zoom_spill_layer(v,scene,lift,(int)x,(int)y,sdl_host_scene_percent(h,v),dx,dy)) ? 255:0;
     }
     return SDL_UpdateTexture(h->zoom_spill,NULL,h->zoom_pixels,RINGS_ZOOM_WIDTH*4) ? sdl_host_error(h,"zoom elevated upload failed"):1;
 }
@@ -181,7 +190,7 @@ static int sdl_host_zoom_upload(SDLHost *h,CPU *c,const VDP *v,const uint8_t *ba
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     h->actor_scene=0;h->actor_frame=v->rendered_frames;
     h->native_actor_x=rings_camera_round(h->camera.hero_x);h->native_actor_y=rings_camera_round(h->camera.hero_y);
-    if(v->native_scene && v->native_motion.valid) {
+    if(!rings_view_wide(v) && sdl_host_scene_percent(h,v)==100 && v->native_motion.valid) {
         if(!h->native_pixels)h->native_pixels=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
         if(!h->motion_lift)h->motion_lift=malloc(RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT);
         if(!h->native_pixels || !h->motion_lift)return sdl_host_error(h,"native motion allocation failed");
@@ -344,9 +353,12 @@ static int sdl_host_draw(SDLHost *h, const VDP *v) {
 #ifdef GENESIS_RINGS_WIDE
     int zoom_active=v->zoom_world_visible && (rings_view_wide(v) || (v->zoom_enabled && h->zoom_percent!=100));
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
-    zoom_active|=h->camera.enabled && v->zoom_world_visible && v->camera.valid;
+    int motion=h->camera.active || h->camera.hero_active || h->camera.x || h->camera.y ||
+               h->camera.hero_x || h->camera.hero_y;
+    int motion_source=rings_view_wide(v) || h->zoom_percent!=100 || v->native_motion.valid;
+    zoom_active|=h->camera.enabled && motion && motion_source && v->zoom_world_visible && v->camera.valid;
     int native_active=h->console && h->camera.enabled && v->native_scene && v->native_motion.valid && v->camera.valid;
-    zoom_active|=native_active;
+    zoom_active|=native_active && motion;
     int actor_active=h->console && h->camera.enabled && (native_active || v->hero_patch.valid) && v->camera.valid;
     upload|=actor_active && (h->native_actor_x!=rings_camera_round(h->camera.hero_x) ||
                             h->native_actor_y!=rings_camera_round(h->camera.hero_y));

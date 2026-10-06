@@ -24,7 +24,13 @@ transition. Loading a slot, changing scenes, disabling smoothing and large
 coordinate jumps reset interpolation. Existing save files remain readable;
 motion caches are reconstructed at the next completed redraw.
 
-The renderer captures only the original 10×10 traversal for indoor exploration.
+The renderer captures the original 10×10 traversal for indoor exploration and
+classic outdoor smoothing at 100%. Cropping the expanded world at 100% would
+let outside tiles overwrite the game's boundary cliffs and buildings.
+The ground opening stays fixed while the camera moves. Roofs, trees, walls and
+actors use a separate elevated layer over the frame, including objects on
+zero-height terrain; flat floor cannot slide over the frame. After a transition
+finishes, classic 100% presentation uses the original video frame directly.
 Combat uses the original frame, including every party member and enemy,
 regardless of the Smooth map setting.
 It redraws resources rather than copying a rectangle containing the hero and
@@ -40,7 +46,8 @@ are retained; this does not generate additional walk animation frames.
 
 Regression tests cover indoor camera coordinates, indoor party poses without an
 outdoor shadow, both outdoor pose writers, centered-camera compensation at
-50–100% zoom, settled outdoor bitmap parity, elevated object ownership, SDL
+50–100% zoom, settled outdoor bitmap parity, original-cell selection at 100%,
+indoor floor clipping, intrinsic terrain height, elevated object ownership, SDL
 presentation and combat parity with smoothing disabled. A local verified-ROM
 probe checks indoor and outdoor hero transitions and the original bitmap; these
 checks do not replace full playtesting.
