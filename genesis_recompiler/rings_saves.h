@@ -23,6 +23,7 @@ typedef struct {
     uint64_t rom_hash,serial,elapsed_ms,last_ms,notice_until;
     unsigned temp_counter;
     int enabled,autosave,started,clock_ready,clock_active,menu,selected,loaded;
+    int battle_pending,battle_entry_seen; /* Host policy; absent from save files. */
 } RingsSaves;
 static int rings_save_error(RingsSaves *s,const char *message) {
     snprintf(s->message,sizeof s->message,"%s",message);
@@ -189,6 +190,21 @@ static int rings_save_write(RingsSaves *s,CPU *c,int slot) {
     return rings_save_write_path(s,c,path,label);
 }
 #include "rings_object_diagnostics.h"
+/* Live RAM is authoritative during transitions, before the next VDP frame. */
+static int rings_save_battle(const CPU *c) {
+    return (rings_objects_long(c,0xa7fc)&0xffffff)==0xffb0bc;
+}
+static int rings_save_battle_entry(const CPU *c) {
+    /* $01DA6C is the common scene-transition routine. Argument two starts
+       combat; zero leaves a room and one/three select rooms. Inspect before LINK
+       changes the stack, and guard the verified ROM entry independently. */
+    unsigned sp=c->a[7]&0xffffff;
+    return c->pc==0x1da6c && !c->fault && c->rom_size>=0x1da70 &&
+        c->rom[0x1da6c]==0x4e && c->rom[0x1da6d]==0x56 &&
+        c->rom[0x1da6e]==0xff && c->rom[0x1da6f]==0xfe &&
+        sp>=0xe00000 && !(sp&1) && (sp&65535)<=65529 &&
+        rings_objects_word(c,(sp&65535)+4)==2 && !rings_save_battle(c);
+}
 static int rings_save_load(RingsSaves *s,CPU *c,int slot) {
     char path[1100];if(!s->enabled || !rings_save_path(s,slot,path,sizeof path))return rings_save_error(s,"invalid save slot");
     FILE *f=rings_save_read_file(path);if(!f)return rings_save_error(s,"slot is empty or cannot be opened");
@@ -205,6 +221,8 @@ static int rings_save_load(RingsSaves *s,CPU *c,int slot) {
     if(!ok)return rings_save_error(s,"damaged save; current game is unchanged");
     memset(&s->objects,0,sizeof s->objects);
     s->started=1;s->elapsed_ms=0;s->clock_ready=0;s->loaded=1;
+    s->battle_entry_seen=rings_save_battle_entry(c);
+    s->battle_pending=s->battle_entry_seen || rings_save_battle(c);
     snprintf(s->message,sizeof s->message,"%s %d loaded",slot<5 ? "Manual":"Autosave",slot%5+1);
     fprintf(stderr,"save: %s\n",s->message);return 1;
 }
@@ -213,20 +231,25 @@ static int rings_save_slot_number(const char *name) {
     if(strlen(name)==6 && !strncmp(name,"auto-",5) && name[5]>='1' && name[5]<='5')return name[5]-'1'+5;
     return -1;
 }
-/* Wall time, not the game's accelerated clock. Do not count host pause/UI. */
+static int rings_save_auto(RingsSaves *s,CPU *c) {
+    int slot=5;
+    for(int i=5;i<10;++i) {
+        if(!s->slots[i].present) {slot=i;break;}
+        if(s->slots[i].serial<s->slots[slot].serial)slot=i;
+    }
+    return rings_save_write(s,c,slot);
+}
+/* Wall time, not the game's accelerated clock. Do not count host pause/UI
+   or combat, including preparation before the battle descriptor is installed. */
 static void rings_save_tick(RingsSaves *s,CPU *c,uint64_t now_ms,int active) {
-    active=active && s->started && s->enabled && s->autosave;
+    active=active && s->started && s->enabled && s->autosave &&
+        !s->battle_pending && !rings_save_battle(c);
     uint64_t elapsed=s->clock_ready && s->clock_active && active && now_ms>=s->last_ms ? now_ms-s->last_ms:0;
     s->last_ms=now_ms;s->clock_ready=1;s->clock_active=active;
     if(!active)return;
     s->elapsed_ms+=elapsed;
     if(s->elapsed_ms<RINGS_SAVE_INTERVAL_MS)return;
-    s->elapsed_ms=0;int slot=5;
-    for(int i=5;i<10;++i) {
-        if(!s->slots[i].present) {slot=i;break;}
-        if(s->slots[i].serial<s->slots[slot].serial)slot=i;
-    }
-    rings_save_write(s,c,slot);s->notice_until=now_ms+4000;
+    s->elapsed_ms=0;rings_save_auto(s,c);s->notice_until=now_ms+4000;
 }
 static void rings_save_input_clear(CPU *c) {
     memset(c->pad_buttons,0,sizeof c->pad_buttons);
@@ -243,9 +266,20 @@ static void rings_save_menu(RingsSaves *s,CPU *c,int mode) {
    its status message; leave the command's native stack/return path intact. */
 static int rings_save_observe(RingsSaves *s,CPU *c,int window) {
     rings_objects_observe(s,c);
-    if(c->pc==0xd28e || c->pc==0xd2be)s->started=1;
-    if(c->pc==0xd284 || c->pc==0x15538) {s->started=0;s->elapsed_ms=0;}
+    if(c->pc!=0x1da6c)s->battle_entry_seen=0;
+    if(c->pc==0xd28e || c->pc==0xd2be) {
+        s->started=1;
+        if(!rings_save_battle(c))s->battle_pending=0;
+    }
+    if(c->pc==0xd284 || c->pc==0x15538) {s->started=0;s->elapsed_ms=0;s->battle_pending=0;}
     if(!window || c->fault || s->menu)return 0;
+    if(!s->battle_entry_seen && rings_save_battle_entry(c)) {
+        s->battle_entry_seen=1;s->battle_pending=1;
+        if(s->started && s->enabled && s->autosave && rings_save_auto(s,c)) {
+            s->elapsed_ms=0;s->clock_active=0;s->notice_until=s->last_ms+4000;
+            fprintf(stderr,"save: captured before battle preparation\n");
+        }
+    }
     if(c->pc==0x20670) {s->started=1;c->pc=0x2068a;rings_save_menu(s,c,1);return 1;}
     if(c->pc==0x20652) {c->pc=0x2066c;rings_save_menu(s,c,2);return 1;}
     if(c->pc==0x1b8ee) {c->pc=0x1b914;rings_save_menu(s,c,2);return 1;}

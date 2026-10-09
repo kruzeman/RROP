@@ -203,8 +203,11 @@ See [gamepad controls](gamepads.md) for mappings and hotplug behavior.
 ## Saves and Settings
 
 There are five manual slots and five rotating autosaves. Autosaves run every
-five minutes of active wall-clock play; paused gameplay and host menus do not
-count. The original Save/Load/Continue entry points open the host slot chooser.
+five minutes of active wall-clock play outside combat; paused gameplay, host
+menus and combat do not count. An additional rotating autosave is written before
+battle preparation starts, regardless of the timer. No autosaves overwrite it
+during the battle. Loading this snapshot resumes the encounter without creating
+another autosave. `--no-autosave` disables both kinds of automatic saves. The original Save/Load/Continue entry points open the host slot chooser.
 Use Up/Down and Enter, X or Z to select; Esc returns.
 
 Default directories:

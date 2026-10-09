@@ -19,7 +19,7 @@ The project focuses on one verified game revision, with optional improvements:
 - Mouse movement and the game's native automatic walking.
 - SDL2 gamepads with hotplug, presets and persistent A/B/C/START button assignments.
 - YM2612/PSG sound, Linux builds and Windows x64 packaging.
-- Five manual saves and five rotating autosaves, every five minutes of active play.
+- Five manual saves and five rotating autosaves: before each battle and every five minutes of active play outside combat.
 - In-game Settings and save menus styled using the game's parchment.
 - Diagnostic reports and emergency snapshots for native Void errors.
 

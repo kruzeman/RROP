@@ -104,6 +104,123 @@ rings_save_tick(&saves,c,2500002,1);assert(saves.serial==2);
 saves.autosave=0;rings_save_tick(&saves,c,3500002,1);assert(saves.serial==2);
 ''')
 
+    def test_prebattle_autosave_keeps_cpu_and_reloading_does_not_rotate_again(self):
+        self.check(r'''
+
+uint8_t *battle_rom=calloc(1,0x1da74);assert(battle_rom);
+battle_rom[0x1da6c]=0x4e;battle_rom[0x1da6d]=0x56;
+battle_rom[0x1da6e]=0xff;battle_rom[0x1da6f]=0xfe;
+c->rom=battle_rom;c->rom_size=0x1da74;assert(rings_saves_open(&saves,c,argv[1],1));
+saves.started=1;c->ram[0xa7fc]=0xff;c->ram[0xa7fd]=0xff;
+c->ram[0xa7fe]=0xb0;c->ram[0xa7ff]=0x8c;c->ram[0xaf]=1;
+c->pc=0x1da6c;write_mem(c,c->a[7]+4,2,2);
+
+SaveCodec before={0},after={0};assert(save_encode(c,&before));
+saves.elapsed_ms=1234;saves.last_ms=1000;
+assert(rings_save_battle_entry(c));assert(!rings_save_observe(&saves,c,1));
+assert(saves.serial==1 && saves.battle_pending && !saves.elapsed_ms && saves.notice_until==5000);
+assert(save_encode(c,&after));assert(before.size==after.size && !memcmp(before.data,after.data,before.size));
+assert(!rings_save_observe(&saves,c,1) && saves.serial==1);
+c->ram[0xa7ff]=0xbc;c->pc=0x1dfb8;
+assert(rings_save_load(&saves,c,5));assert(c->pc==0x1da6c && c->ram[0xa7ff]==0x8c);
+assert(saves.battle_entry_seen && saves.battle_pending);
+assert(!rings_save_observe(&saves,c,1) && saves.serial==1);
+free(before.data);free(after.data);
+free(battle_rom);
+''')
+
+    def test_combat_preparation_and_loaded_battles_suspend_timer_until_exploration_returns(self):
+        self.check(r'''
+
+uint8_t *battle_rom=calloc(1,0x1da74);assert(battle_rom);
+battle_rom[0x1da6c]=0x4e;battle_rom[0x1da6d]=0x56;
+battle_rom[0x1da6e]=0xff;battle_rom[0x1da6f]=0xfe;
+c->rom=battle_rom;c->rom_size=0x1da74;assert(rings_saves_open(&saves,c,argv[1],1));
+saves.started=1;c->ram[0xa7fc]=0xff;c->ram[0xa7fd]=0xff;
+c->ram[0xa7fe]=0xb0;c->ram[0xa7ff]=0x8c;c->ram[0xaf]=1;
+c->pc=0x1da6c;write_mem(c,c->a[7]+4,2,2);
+
+assert(!rings_save_observe(&saves,c,1) && saves.serial==1);
+c->pc=0x1dc1c;rings_save_observe(&saves,c,1);
+rings_save_tick(&saves,c,0,1);rings_save_tick(&saves,c,900000,1);
+assert(saves.serial==1 && !saves.elapsed_ms && saves.battle_pending);
+c->ram[0xa7ff]=0xbc;c->ram[0xaf]=2;c->pc=0xd2be;rings_save_observe(&saves,c,1);
+rings_save_tick(&saves,c,1800000,1);assert(saves.serial==1 && saves.battle_pending);
+assert(rings_save_write(&saves,c,0));assert(rings_save_load(&saves,c,0));
+assert(saves.battle_pending);rings_save_tick(&saves,c,2100000,1);assert(saves.serial==2);
+c->ram[0xa7ff]=0xac;c->pc=0x1de6a;rings_save_observe(&saves,c,1);
+rings_save_tick(&saves,c,2400000,1);assert(saves.serial==2 && saves.battle_pending);
+c->pc=0xd2be;rings_save_observe(&saves,c,1);assert(!saves.battle_pending);
+rings_save_tick(&saves,c,2700000,1);assert(!saves.elapsed_ms && saves.serial==2);
+rings_save_tick(&saves,c,3000000,1);assert(saves.serial==3);
+free(battle_rom);
+''')
+
+    def test_prebattle_save_rotates_oldest_auto_slot_and_preserves_manual_slots(self):
+        self.check(r'''
+
+uint8_t *battle_rom=calloc(1,0x1da74);assert(battle_rom);
+battle_rom[0x1da6c]=0x4e;battle_rom[0x1da6d]=0x56;
+battle_rom[0x1da6e]=0xff;battle_rom[0x1da6f]=0xfe;
+c->rom=battle_rom;c->rom_size=0x1da74;assert(rings_saves_open(&saves,c,argv[1],1));
+saves.started=1;c->ram[0xa7fc]=0xff;c->ram[0xa7fd]=0xff;
+c->ram[0xa7fe]=0xb0;c->ram[0xa7ff]=0x8c;c->ram[0xaf]=1;
+c->pc=0x1da6c;write_mem(c,c->a[7]+4,2,2);
+
+for(int i=0;i<10;++i)assert(rings_save_write(&saves,c,i));
+assert(!rings_save_observe(&saves,c,1) && saves.serial==11);
+for(int i=0;i<5;++i)assert(saves.slots[i].serial==(unsigned)i+1);
+assert(saves.slots[5].serial==11);
+for(int i=6;i<10;++i)assert(saves.slots[i].serial==(unsigned)i+1);
+free(battle_rom);
+''')
+
+    def test_prebattle_hook_ignores_rooms_exit_disabled_autosaves_and_wrong_rom(self):
+        self.check(r'''
+
+uint8_t *battle_rom=calloc(1,0x1da74);assert(battle_rom);
+battle_rom[0x1da6c]=0x4e;battle_rom[0x1da6d]=0x56;
+battle_rom[0x1da6e]=0xff;battle_rom[0x1da6f]=0xfe;
+c->rom=battle_rom;c->rom_size=0x1da74;assert(rings_saves_open(&saves,c,argv[1],1));
+saves.started=1;c->ram[0xa7fc]=0xff;c->ram[0xa7fd]=0xff;
+c->ram[0xa7fe]=0xb0;c->ram[0xa7ff]=0x8c;c->ram[0xaf]=1;
+c->pc=0x1da6c;write_mem(c,c->a[7]+4,2,2);
+
+for(unsigned kind=0;kind<4;++kind) {
+ if(kind==2)continue;
+ c->pc=0x200;rings_save_observe(&saves,c,1);c->pc=0x1da6c;
+ write_mem(c,c->a[7]+4,2,kind);assert(!rings_save_battle_entry(c));
+ rings_save_observe(&saves,c,1);assert(!saves.serial && !saves.battle_pending);
+}
+write_mem(c,c->a[7]+4,2,2);battle_rom[0x1da6c]=0;
+assert(!rings_save_battle_entry(c));rings_save_observe(&saves,c,1);assert(!saves.serial);
+battle_rom[0x1da6c]=0x4e;
+c->a[7]++;assert(!rings_save_battle_entry(c));c->a[7]--;
+c->ram[0xa7ff]=0xbc;assert(!rings_save_battle_entry(c));c->ram[0xa7ff]=0x8c;
+rings_save_observe(&saves,c,0);assert(!saves.serial && !saves.battle_pending);
+saves.autosave=0;rings_save_observe(&saves,c,1);assert(!saves.serial && saves.battle_pending);
+free(battle_rom);
+''')
+
+    def test_failed_prebattle_save_keeps_game_running_and_blocks_battle_timer(self):
+        self.check(r'''
+
+uint8_t *battle_rom=calloc(1,0x1da74);assert(battle_rom);
+battle_rom[0x1da6c]=0x4e;battle_rom[0x1da6d]=0x56;
+battle_rom[0x1da6e]=0xff;battle_rom[0x1da6f]=0xfe;
+c->rom=battle_rom;c->rom_size=0x1da74;assert(rings_saves_open(&saves,c,argv[1],1));
+saves.started=1;c->ram[0xa7fc]=0xff;c->ram[0xa7fd]=0xff;
+c->ram[0xa7fe]=0xb0;c->ram[0xa7ff]=0x8c;c->ram[0xaf]=1;
+c->pc=0x1da6c;write_mem(c,c->a[7]+4,2,2);
+
+assert(rings_save_write(&saves,c,0));
+snprintf(saves.directory,sizeof saves.directory,"%s/missing",argv[1]);
+rings_save_observe(&saves,c,1);assert(!c->fault && saves.serial==1 && saves.battle_pending);
+snprintf(saves.directory,sizeof saves.directory,"%s",argv[1]);
+assert(rings_save_load(&saves,c,0));assert(!rings_save_observe(&saves,c,1) && saves.serial==1);
+free(battle_rom);
+''')
+
     def test_corrupt_truncated_wrong_rom_audio_invalid_state_do_not_mutate_cpu(self):
         self.check(r'''
 assert(rings_save_write(&saves,c,0));char path[1100];assert(rings_save_path(&saves,0,path,sizeof path));
