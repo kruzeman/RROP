@@ -35,7 +35,7 @@ v->camera.generation++;v->camera.x=28;v->camera.y=16;
 rings_camera_update(&t,v,1100,1000,100);assert(t.x==28 && t.y==16 && t.active);
 for(unsigned ms=1110;ms<1300;ms+=10) {
  rings_camera_update(&t,v,ms,1000,100);
- assert(rings_camera_abs(t.x-28*(1300-ms)/200.0)<0.000001);
+ assert(rings_camera_abs(t.x-28*((1300-ms)/200.0)*((1300-ms)/200.0))<0.000001);
 }
 double x=t.x,y=t.y;rings_camera_update(&t,v,1290,1000,100);assert(t.x==x && t.y==y);
 rings_camera_update(&t,v,1300,1000,100);assert(!t.active && !t.x && !t.y);
@@ -47,7 +47,7 @@ assert(t.transitions==1 && !c->steps && !c->master_cycles && !c->pad_buttons[0])
         self.check(r'''
 v->camera.generation++;v->camera.x=28;rings_camera_update(&t,v,1100,1000,100);
 v->camera.generation++;v->camera.x=56;rings_camera_update(&t,v,1200,1000,100);
-assert(t.x==42 && t.active && t.transitions==2);
+assert(t.x==35 && t.active && t.transitions==2);
 rings_camera_update(&t,v,1400,1000,100);assert(!t.x && !t.active);
 ''')
 
@@ -67,16 +67,35 @@ v->zoom_world_visible=1;rings_camera_update(&t,v,1270,1000,80);assert(!t.active)
 v->camera.valid=0;rings_camera_update(&t,v,1280,1000,80);assert(!t.ready);
 ''')
 
-    def test_capture_and_commit_use_the_submitted_scene_and_skip_rooms(self):
+    def test_capture_and_commit_use_submitted_scene_and_exclude_combat(self):
         self.check(r'''
 c->ram[0xa7fc]=0xff;c->ram[0xa7fd]=0xff;c->ram[0xa7fe]=0xb0;c->ram[0xa7ff]=0x8c;
 c->ram[0xe8f]=111;c->ram[0xe91]=125;c->ram[0xb099]=1;
 RingsCameraSnapshot a=rings_camera_capture(c);assert(a.valid && a.x==-196 && a.y==1888);
-c->ram[0xb099]=0;assert(!rings_camera_capture(c).valid);c->ram[0xb099]=1;
+c->ram[0xb099]=0;assert(rings_camera_capture(c).valid);
+c->ram[0xa7ff]=0xbc;assert(!rings_camera_capture(c).valid);
+c->ram[0xa7ff]=0x8c;c->ram[0xb099]=1;
 c->ram[0x8674]=4;c->ram[0x8675]=0;w.camera_work=a;w.pending=1;c->pc=0x1b9ee;c->master_cycles=123456;
 c->ram[0xe8f]=115;rings_wide_observe(c);
 assert(w.camera.x==-196 && w.camera.generation==1 && w.camera.clocks==123456);
 vdp_render(c);assert(v->camera.x==-196 && v->camera.generation==1);
+''')
+
+    def test_room_tween_uses_native_scale_and_resets_on_outdoor_transition(self):
+        self.check(r'''
+v->native_scene=v->native_world_valid=1;v->zoom_world_visible=0;
+v->hero.valid=1;v->hero.x=416;v->hero.y=260;rings_camera_reset(&t);
+rings_camera_update(&t,v,1000,1000,50);assert(t.ready && t.native && t.percent==100);
+v->camera.generation++;v->hero.x+=14;v->hero.y+=8;
+rings_camera_update(&t,v,1100,1000,50);assert(t.active && !t.x && !t.y && t.hx==-14 && t.hy==-8);
+rings_camera_update(&t,v,1200,1000,50);assert(t.hx==-3.5 && t.hy==-2);
+rings_camera_update(&t,v,1200,1000,50);assert(t.hx==-3.5); /* Pause freezes progress. */
+rings_camera_update(&t,v,1300,1000,50);assert(!t.active && !t.hx && !t.hy);
+v->camera.generation++;v->camera.x+=14;v->camera.y+=8;
+rings_camera_update(&t,v,1400,1000,50);assert(t.x==14 && t.y==8 && t.hx==-14 && t.hy==-8);
+v->native_scene=0;v->zoom_world_visible=1;
+rings_camera_update(&t,v,1410,1000,50);assert(!t.active && !t.native && t.percent==50);
+assert(!c->steps && !c->master_cycles);
 ''')
 
     def test_elevated_spill_uses_the_shifted_ground_position(self):
@@ -94,10 +113,30 @@ assert(!rings_zoom_spill_shift(v,sx,sy,100,400,0));
         self.check(r'''
 c->a[7]=0xffff00;c->sr=0x2700;c->pc=0x200;c->rom=rom_data;c->rom_size=sizeof rom_data;
 c->d[0]=123;c->pad_buttons[0]=PAD_RIGHT;w.camera=v->camera;
+ w.hero.valid=w.hero_work.valid=v->hero.valid=1;
 SaveCodec s={0};assert(save_encode(c,&s));c->d[0]=456;
 assert(save_decode(c,s.data,s.pos));assert(c->d[0]==123);
 assert(!c->vdp.camera.valid && !w.camera.valid && !w.camera_work.valid);
+assert(!c->vdp.hero.valid && !w.hero.valid && !w.hero_work.valid);
 free(s.data);
+''')
+
+    def test_player_travel_is_independent_of_camera_and_resets_on_actor_change(self):
+        self.check(r'''
+v->hero.valid=1;v->hero.x=416;v->hero.y=260;rings_camera_reset(&t);
+rings_camera_update(&t,v,1000,1000,100);
+v->camera.generation++;v->camera.x=28;v->camera.y=16;
+rings_camera_update(&t,v,1100,1000,100);assert(t.x==28 && t.hx==-28 && t.y==16 && t.hy==-16);
+rings_camera_update(&t,v,1200,1000,100);assert(t.x==7 && t.hx==-7 && !((t.x+t.hx)+(t.y+t.hy)));
+rings_camera_update(&t,v,1300,1000,100);assert(!t.active && !t.hx && !t.hy);
+v->camera.generation++;v->hero.x+=14;v->hero.y+=8;
+rings_camera_update(&t,v,1400,1000,100);assert(!t.x && !t.y && t.hx==-14 && t.hy==-8);
+rings_camera_update(&t,v,1500,1000,100);assert(t.hx==-3.5 && t.hy==-2);
+v->camera.generation++;v->hero.sprite++;rings_camera_update(&t,v,1510,1000,100);
+assert(!t.hx && !t.hy);
+v->camera.generation++;v->hero.x+=14;rings_camera_update(&t,v,1520,1000,100);assert(t.hx==-14);
+v->camera.generation++;v->camera.identity++;rings_camera_update(&t,v,1530,1000,100);
+assert(!t.active && !t.hx && !t.hy);
 ''')
 
     def test_option_requires_sdl_and_verified_rom(self):

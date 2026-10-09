@@ -13,18 +13,44 @@ static const uint8_t *rings_view_pixels(const VDP *v,int external_font) {
 #endif
     return rings_view_wide(v) ? v->wide_frame:v->frame;
 }
+static int rings_zoom_native_lift(const VDP *v,unsigned x,unsigned y,unsigned ink,int lift) {
+    unsigned width=v->frame_width,height=v->frame_height,screen=y*width+x;
+    if(x>=width || y>=184 || y>=height || !ink || !v->zoom_restore[screen] || v->zoom_mask[screen])return lift;
+    int ground=(int)y+lift,last=(int)(height<184 ? height:184)-1;
+    if(ground>last)ground=last;
+    if(ground<0)ground=0;
+    for(int distance=0;distance<=last;++distance) {
+        int below=ground+distance,above=ground-distance;
+        if(below<=last && v->zoom_mask[(unsigned)below*width+x])return below-(int)y;
+        if(above>=0 && v->zoom_mask[(unsigned)above*width+x])return above-(int)y;
+    }
+    return lift;
+}
 static void rings_zoom_prepare(CPU *c,const uint8_t *sprites) {
     VDP *v=&c->vdp;const RingsWide *w=c->wide;
     unsigned width=rings_view_width(v),height=v->frame_height,offset=(width-v->frame_width)/2;
     memset(v->zoom_mask,0,sizeof v->zoom_mask);
     memset(v->zoom_restore,0,sizeof v->zoom_restore);
     v->zoom_world_visible=(uint8_t)(rings_wide_visible(c) && w->zoom_valid);
+    int room=v->native_scene && rings_scene_room(c) && w->native_valid &&
+             w->identity==rings_scene_identity(c) && rings_bitmap_visible(c);
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
-    if(v->zoom_world_visible)v->camera=w->camera;else v->camera.valid=0;
+    if(v->zoom_world_visible || room) {v->camera=w->camera;v->hero=room ? w->native_hero:w->hero;}
+    else {v->camera.valid=0;v->hero.valid=0;}
 #endif
-    if(!v->zoom_world_visible)return;
-    memcpy(v->zoom_scene,w->zoom_scene,sizeof v->zoom_scene);
-    memcpy(v->zoom_lift,w->lift_scene,sizeof v->zoom_lift);
+    v->native_world_valid=(uint8_t)((v->zoom_world_visible || room) && w->native_valid);
+    if(!v->zoom_world_visible && !room)return;
+    if(!room) {
+        memcpy(v->zoom_scene,w->zoom_scene,sizeof v->zoom_scene);
+        memcpy(v->zoom_lift,w->lift_scene,sizeof v->zoom_lift);
+    }
+    if(v->native_world_valid) {
+        memcpy(v->native_world,w->native_scene,sizeof v->native_world);
+        for(unsigned p=0;p<288*184;++p)v->native_lift[p]=w->native_lift_scene[p];
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+        v->native_hero=w->native_hero;
+#endif
+    }
     v->zoom_focus_x=(w->focus_x ? w->focus_x:184)+RINGS_ZOOM_LEFT;
     v->zoom_focus_y=(w->focus_y ? w->focus_y:RINGS_SCENE_TOP+96)+RINGS_ZOOM_TOP-RINGS_SCENE_TOP;
     for(unsigned i=0;i<16;++i) {
@@ -66,6 +92,26 @@ static void rings_zoom_prepare(CPU *c,const uint8_t *sprites) {
         v->zoom_background[pixel*3+1]=vdp_channel((rgb>>5)&7,1);
         v->zoom_background[pixel*3+2]=vdp_channel((rgb>>9)&7,1);
     }
+    if(v->native_world_valid && !rings_view_wide(v)) {
+        /* The original traversal already chose which silhouettes cross the
+           frame. Its ground edge can land on an opaque dither/outline pixel
+           of plane B. Anchor those accepted pixels to the nearest transparent
+           ground pixel in the same column, so smoothing preserves the complete
+           original outline instead of cutting alternate columns out of it. */
+        for(unsigned y=0;y<184 && y<height;++y)for(unsigned x=0;x<288;++x) {
+            unsigned p=y*288+x;
+            v->native_lift[p]=(int16_t)rings_zoom_native_lift(v,x+16,y,v->native_world[p],v->native_lift[p]);
+        }
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+        RingsHeroLayer *a=&v->native_hero;
+        if(a->valid)for(unsigned p=0;p<128*128;++p) {
+            int x=(int)a->x+(int)(p%128)-RINGS_ZOOM_LEFT-24;
+            int y=(int)a->y+(int)(p/128)-RINGS_ZOOM_TOP;
+            if(x>=16 && x<304 && y>=0 && y<184)
+                a->under_lift[p]=(int16_t)rings_zoom_native_lift(v,(unsigned)x,(unsigned)y,a->under[p],a->under_lift[p]);
+        }
+#endif
+    }
 }
 static int rings_zoom_sample(int pixel,int source_anchor,int target_anchor,unsigned percent) {
     int numerator=(2*(pixel-target_anchor)+1)*50;
@@ -79,16 +125,20 @@ static int rings_zoom_project(int pixel,int anchor,unsigned percent) {
 /* Only an elevated pixel whose ground projection lies in the aperture may
    spill over its upper edge. Use the frozen ground mask at the current scale;
    the old 100% silhouettes never determine the new object's outline. */
-static int rings_zoom_spill_shift(const VDP *v,int sx,int sy,unsigned percent,int shift_x,int shift_y) {
+static int rings_zoom_ground_spill(const VDP *v,int sx,int sy,unsigned ink,int lift,unsigned percent,int shift_x,int shift_y) {
     if(rings_view_wide(v) || sx<0 || sx>=RINGS_ZOOM_WIDTH || sy<0 || sy>=RINGS_ZOOM_HEIGHT)return 0;
-    unsigned p=(unsigned)sy*RINGS_ZOOM_WIDTH+(unsigned)sx;
-    if(!v->zoom_lift[p] || !v->zoom_scene[p])return 0;
+    if(!lift || !ink)return 0;
     int target_x=(int)v->zoom_focus_x-RINGS_ZOOM_LEFT-24;
     int target_y=(int)v->zoom_focus_y-RINGS_ZOOM_TOP;
     int gx=target_x+rings_zoom_project(sx,v->zoom_focus_x,percent)+shift_x;
-    int gy=target_y+rings_zoom_project(sy+v->zoom_lift[p],v->zoom_focus_y,percent)+shift_y;
+    int gy=target_y+rings_zoom_project(sy+(int)lift,v->zoom_focus_y,percent)+shift_y;
     return gx>=0 && gx<(int)v->frame_width && gy>=0 && gy<(int)v->frame_height &&
            v->zoom_mask[(unsigned)gy*v->frame_width+(unsigned)gx];
+}
+static int rings_zoom_spill_shift(const VDP *v,int sx,int sy,unsigned percent,int shift_x,int shift_y) {
+    if(sx<0 || sx>=RINGS_ZOOM_WIDTH || sy<0 || sy>=RINGS_ZOOM_HEIGHT)return 0;
+    unsigned p=(unsigned)sy*RINGS_ZOOM_WIDTH+(unsigned)sx;
+    return rings_zoom_ground_spill(v,sx,sy,v->zoom_scene[p],v->zoom_lift[p],percent,shift_x,shift_y);
 }
 static int rings_zoom_spill(const VDP *v,int sx,int sy,unsigned percent) {
     return rings_zoom_spill_shift(v,sx,sy,percent,0,0);

@@ -16,6 +16,7 @@
 #include "eeprom_state.h"
 #include "audio_stub_state.h"
 #include "audio_state.h"
+#include "rings_pad.h"
 #include "rings_wide_state.h"
 
 enum { AUDIO_STRICT=0, AUDIO_STUB=1, AUDIO_MUTE=2, AUDIO_ON=3 };
@@ -378,7 +379,8 @@ static int run_main(int argc, char **argv, const uint8_t *rom, size_t size, int 
     const char *save_directory=NULL;int autosave=1,load_slot=-1,save_slot=-1;
 #endif
     int widescreen=0,zoom=0;const char *wide_dump=NULL;
-    int mouse=0,smooth_camera=0;
+    int mouse=0,smooth_camera=0,responsive_movement=0;
+    (void)responsive_movement;
     (void)mouse;(void)smooth_camera; /* Optional presentation flags in headless builds. */
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     uint64_t smooth_ms=200;
@@ -436,6 +438,13 @@ static int run_main(int argc, char **argv, const uint8_t *rom, size_t size, int 
             fprintf(stderr,"zoom support is not compiled in; rebuild Rings of Power with --zoom\n");return 64;
 #endif
         }
+        else if (!strcmp(argv[i],"--responsive-movement")) {
+#if defined(GENESIS_RINGS_WIDE) && defined(GENESIS_SDL2)
+            responsive_movement=1;
+#else
+            fprintf(stderr,"responsive movement requires a Rings SDL2 build\n");return 64;
+#endif
+        }
         else if (!strcmp(argv[i],"--mouse")) {
 #if defined(GENESIS_RINGS_WIDE) && defined(GENESIS_SDL2)
             mouse=1;zoom=1;
@@ -481,6 +490,7 @@ static int run_main(int argc, char **argv, const uint8_t *rom, size_t size, int 
 #endif
     if(font_path && !window) { fprintf(stderr,"--font requires --window\n");return 64; }
 #if defined(GENESIS_RINGS_WIDE) && defined(GENESIS_SDL2)
+    if(responsive_movement && !window) {fprintf(stderr,"--responsive-movement requires --window\n");return 64;}
     if(mouse && !window) {fprintf(stderr,"--mouse requires --window\n");return 64;}
 #endif
     if(zoom && !window) { fprintf(stderr,"--zoom requires --window\n");return 64; }
@@ -551,7 +561,7 @@ static int run_main(int argc, char **argv, const uint8_t *rom, size_t size, int 
     c.vdp.wide_enabled=(uint8_t)widescreen;c.vdp.zoom_enabled=(uint8_t)zoom;
 #endif
 #if defined(GENESIS_RINGS_SAVES) && defined(GENESIS_SDL2)
-    if(window)rings_settings_init(&host,&c,widescreen,zoom,mouse,smooth_camera);
+    if(window) {host.responsive_movement=responsive_movement;rings_settings_init(&host,&c,widescreen,zoom,mouse,smooth_camera);}
 #endif
 #ifdef GENESIS_RINGS_SAVES
     if(load_slot>=0 && !rings_save_load(&saves,&c,load_slot)) {
@@ -601,7 +611,7 @@ static int run_main(int argc, char **argv, const uint8_t *rom, size_t size, int 
         if (c.fault) break;
         if (c.halted && !machine_can_wake(&c)) break;
 #if defined(GENESIS_RINGS_WIDE) && defined(GENESIS_SDL2)
-        if(window)rings_mouse_observe(&host,&c);
+        if(window) {rings_pad_observe(&host,&c);rings_mouse_observe(&host,&c);}
 #endif
         if (trace) fprintf(stderr,"step=%" PRIu64 " pc=%06" PRIx32 " sr=%04x D0=%08" PRIx32 " A7=%08" PRIx32 "\n",c.steps,c.pc,c.sr,c.d[0],c.a[7]);
 #ifdef GENESIS_RINGS_SAVES
@@ -640,6 +650,8 @@ static int run_main(int argc, char **argv, const uint8_t *rom, size_t size, int 
     if(widescreen)printf("wide mode=rings-experimental size=%ux%u scenes=%" PRIu64 " failures=%" PRIu64 " world=%u\n",
         rings_view_width(&c.vdp),c.vdp.frame_height,wide.scenes,wide.failures,c.vdp.wide_world_visible);
 #ifdef GENESIS_SDL2
+    if(responsive_movement)printf("movement mode=rings-responsive enhanced=%d resolved=%" PRIu64 " native_fallbacks=%" PRIu64 " timing_failures=%" PRIu64 "\n",
+        wide.motion.enabled,wide.motion.moves,wide.motion.rejected,wide.motion.timing_failures);
     if(mouse)printf("mouse mode=rings starts=%" PRIu64 " direction_reads=%" PRIu64 "\n",host.mouse.starts,host.mouse.reads);
     if(zoom)printf("zoom mode=rings-viewport scale=%u%% size=%ux%u scenes=%" PRIu64 " failures=%" PRIu64 " world=%u\n",
         c.vdp.native_scene ? 100:host.zoom_percent,rings_view_width(&c.vdp),c.vdp.frame_height,wide.scenes,wide.failures,c.vdp.zoom_world_visible);
@@ -691,7 +703,7 @@ usage:
 #ifdef GENESIS_RINGS_SAVES
     fprintf(stderr,"save options: --save-dir directory --no-autosave --load-slot manual-1..5|auto-1..5 --save-slot manual-1..5\n");
 #endif
-    fprintf(stderr,"usage: %s [--window|--headless] [--no-throttle] [--region ntsc|pal] [--limit instruction-count] [--peek address] [--trace] [--audio strict|stub|mute|on] [--dump-audio file.wav] [--resources-dir directory] [--dump-vram file] [--dump-z80 file] [--dump-frame file.ppm] [--font font-file] [--widescreen] [--zoom] [--mouse] [--dump-wide-frame file.ppm] [--smooth-camera] [--camera-smooth-ms 60..500]\n",argv[0]); return 64;
+    fprintf(stderr,"usage: %s [--window|--headless] [--no-throttle] [--region ntsc|pal] [--limit instruction-count] [--peek address] [--trace] [--audio strict|stub|mute|on] [--dump-audio file.wav] [--resources-dir directory] [--dump-vram file] [--dump-z80 file] [--dump-frame file.ppm] [--font font-file] [--widescreen] [--zoom] [--mouse] [--responsive-movement] [--dump-wide-frame file.ppm] [--smooth-camera] [--camera-smooth-ms 60..500]\n",argv[0]); return 64;
 }
 #endif
 #endif

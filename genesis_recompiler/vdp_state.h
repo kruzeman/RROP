@@ -28,6 +28,7 @@ typedef struct {
 #ifdef GENESIS_RINGS_WIDE
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     RingsCameraSnapshot camera;
+    RingsHeroLayer hero,native_hero;
 #endif
     uint8_t wide_hud_active;
     uint8_t native_scene; /* Derived frame policy, not a saved user preference. */
@@ -36,6 +37,8 @@ typedef struct {
     uint16_t zoom_focus_x,zoom_focus_y;
     uint8_t zoom_scene[960*704],zoom_mask[400*240],zoom_restore[400*240];
     uint8_t zoom_lift[960*704];
+    uint8_t native_world[288*184],native_world_valid;
+    int16_t native_lift[288*184];
     uint8_t zoom_background[400*240*3],zoom_palette[16*3];
 #ifdef GENESIS_RINGS_MENU_FONT
     uint8_t wide_font_frame[400*240*3];

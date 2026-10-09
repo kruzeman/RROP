@@ -14,7 +14,7 @@ Saves remain available. **Mode: Enhanced** exposes these options:
 | --- | --- |
 | Widescreen | Expanded outdoor world; HUD displayed over it |
 | Fullscreen | Desktop fullscreen |
-| Smooth map | Interpolated outdoor camera scrolling |
+| Smooth map | Smooth outdoor scrolling and player movement |
 | Zoom | Mouse-wheel zoom between 50% and 100% |
 | Mouse controls | Left-button movement; right-button native automatic walking |
 | Control settings | Gamepad toggle, presets and A/B/C/START button assignment; available in both modes |
@@ -27,6 +27,8 @@ autosave timer pause while the host menu is open.
 
 Interiors and battles retain the original viewport and 100% zoom, even in
 Enhanced mode. The selected outdoor zoom returns on leaving those scenes.
+Smooth map also smooths the player and camera in interiors, using the original
+viewport. Battles keep their native presentation.
 Zoom does not change the game's simulation speed. Smooth scrolling is a
 presentation feature; the native game still updates its decisions at its own rate.
 
@@ -41,3 +43,5 @@ an on-screen graphic, not physical gamepad input.
 External fonts require building with `--text-renderer rings-text` and launching
 with `--font /path/to/font.ttf`. Other window features are compiled by default.
 See [the manual](usage.md) for build and launch examples.
+
+[Implementation and validation](smooth-movement.md).

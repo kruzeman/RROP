@@ -94,7 +94,12 @@ static void rings_save_host_loaded(SDLHost *h,CPU *c) {
     sdl_pad_clear(&h->input);
     if(h->settings.ready) {c->ram[0x132]=0;c->ram[0x133]=(uint8_t)h->settings.help;}
 #ifdef GENESIS_RINGS_WIDE
-    rings_mouse_reset(&h->mouse);
+    rings_pad_reset(&h->pad_intent);rings_mouse_reset(&h->mouse);
+    if(c->wide) {
+        memset(&c->wide->motion,0,sizeof c->wide->motion);
+        c->wide->motion.enabled=h->responsive_movement && h->settings.enhanced;
+        c->wide->motion.intent=&h->pad_intent;
+    }
 #endif
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     rings_camera_reset(&h->camera);

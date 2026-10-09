@@ -37,11 +37,17 @@ static void rings_settings_apply(SDLHost *h,CPU *c) {
     }
 #ifdef GENESIS_RINGS_WIDE
     c->vdp.wide_enabled=(uint8_t)(s->enhanced && s->wide);
-    /* Mouse picking and smooth scrolling need the scene layer at 100%, too. */
-    c->vdp.zoom_enabled=(uint8_t)(s->enhanced && (s->zoom || s->mouse || s->smooth));
+    /* Enhanced response uses the completed scene even at 100% with mouse,
+       zoom and smooth scrolling disabled. Their UI toggles remain independent. */
+    c->vdp.zoom_enabled=(uint8_t)s->enhanced;
     h->zoom_percent=s->enhanced && s->zoom ? s->saved_zoom:100;
-    rings_mouse_reset(&h->mouse);h->mouse.enabled=s->enhanced && s->mouse;
+    rings_pad_reset(&h->pad_intent);rings_mouse_reset(&h->mouse);h->mouse.enabled=s->enhanced && s->mouse;
     rings_scene_discard(c);
+    if(c->wide) {
+        memset(&c->wide->motion,0,sizeof c->wide->motion);
+        c->wide->motion.enabled=h->responsive_movement && s->enhanced;
+        c->wide->motion.intent=&h->pad_intent;
+    }
 #endif
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     rings_camera_reset(&h->camera);h->camera.enabled=s->enhanced && s->smooth;
@@ -109,7 +115,7 @@ static void rings_settings_open(SDLHost *h,CPU *c) {
     RingsSettings *s=&h->settings;s->menu=1;s->selected=0;s->controls=0;s->remap=0;s->message[0]=0;
     sdl_pad_clear(&h->input);rings_save_input_clear(c);h->fast_forward=0;
 #ifdef GENESIS_RINGS_WIDE
-    rings_mouse_reset(&h->mouse);
+    rings_pad_reset(&h->pad_intent);rings_mouse_reset(&h->mouse);
 #endif
     h->next_service=c->master_cycles;h->last_frame=UINT64_MAX;sdl_host_rebase(h,c);
 }

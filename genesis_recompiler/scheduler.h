@@ -25,10 +25,14 @@ static int machine_interrupt(CPU *c) {
     machine_advance(c,44);
     return 1;
 }
+#include "rings_motion.h"
 static void machine_step(CPU *c) {
     if (c->fault) return;
     if (machine_interrupt(c)) return;
     if (c->halted) { machine_advance(c,4); return; }
+#if defined(GENESIS_RINGS_WIDE) && defined(GENESIS_SDL2)
+    if(rings_motion_before(c))return;
+#endif
     c->instruction_cycles=0;
 #ifdef GENESIS_RINGS_WIDE
     rings_wide_observe(c);
@@ -36,6 +40,9 @@ static void machine_step(CPU *c) {
     translated_step(c); ++c->steps;
     unsigned cycles=c->instruction_cycles;
     c->instruction_cycles=0;
+#if defined(GENESIS_RINGS_WIDE) && defined(GENESIS_SDL2)
+    if(c->wide && c->wide->motion.drawing)return;
+#endif
     machine_advance(c,cycles);
 }
 static int machine_can_wake(const CPU *c) {

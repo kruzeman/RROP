@@ -53,6 +53,27 @@ for(unsigned wide=0;wide<2;++wide)for(unsigned battle=0;battle<2;++battle) {
 }
 ''')
 
+    def test_room_native_capture_survives_vblank_and_commits_at_real_upload(self):
+        self.check(r'''
+context(c,0xb0ac,0,2);c->ram[0xe8f]=24;c->ram[0xe91]=16;c->ram[0xe99]=156;
+uint64_t identity=rings_scene_identity(c);assert(identity && rings_scene_room(c));
+w.identity_work=identity;w.native_pending=1;
+w.camera_work=rings_camera_capture(c);assert(w.camera_work.valid && w.camera_work.x==112 && w.camera_work.y==320);
+memset(w.native_work,2,sizeof w.native_work);w.native_hero_work.valid=1;
+w.native_hero_work.x=432;w.native_hero_work.y=270;w.native_hero_work.sprite=0;
+rings_scene_snapshot(c);assert(w.native_pending && !w.native_valid);
+c->pc=0x1b9ee;c->master_cycles=123456;c->ram[0x8674]=4;
+rings_wide_observe(c);assert(w.native_valid && !w.native_pending && w.identity==identity);
+assert(w.camera.clocks==123456 && w.camera.generation==1 && w.native_hero.valid);
+vdp_render(c);assert(c->vdp.native_scene && c->vdp.native_world_valid && c->vdp.camera.valid && c->vdp.hero.valid);
+assert(!c->vdp.zoom_world_visible && !w.valid && !w.zoom_valid && rings_view_width(&c->vdp)==320);
+/* Descriptors are reused for identically sized rooms. Changing the room ID
+   must discard both published and pending presentation histories. */
+w.native_pending=1;c->ram[0xe99]++;assert(rings_scene_identity(c)!=identity);
+vdp_render(c);assert(!w.native_valid && !w.native_pending && !c->vdp.hero.valid);
+context(c,0xb0bc,0,2);assert(!rings_scene_room(c) && !rings_camera_capture(c).valid);
+''')
+
     def test_absent_invalid_and_outdoor_descriptors_are_not_rooms(self):
         self.check(r'''
 assert(!rings_scene_native(c));

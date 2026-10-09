@@ -6,6 +6,7 @@
 #include "rings_window.h"
 #include "rings_camera.h"
 #include "rings_mouse.h"
+#include "rings_pad.h"
 #include "rings_settings_state.h"
 #include "gamepad_sdl.h"
 #ifdef GENESIS_RINGS_MENU_FONT
@@ -34,10 +35,15 @@ typedef struct {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     RingsCameraTween camera;
     int spill_x,spill_y,last_smooth;
+    int last_hero_split,hero_dx,hero_dy;
+    unsigned hero_tex_x,hero_tex_y;
+    SDL_Texture *hero_texture,*hero_spill;
 #endif
 #ifdef GENESIS_RINGS_WIDE
     RingsMouse mouse;
+    RingsPadIntent pad_intent;
     unsigned zoom_percent,last_zoom;
+    int responsive_movement;
     uint8_t *zoom_pixels;
     SDL_Texture *zoom_world,*zoom_ui,*zoom_spill,*zoom_guard;
     unsigned zoom_width,zoom_height;
@@ -50,6 +56,10 @@ static void sdl_host_close(SDLHost *h) {
     SDL_DestroyTexture(h->settings.paper_texture);
 #endif
 #ifdef GENESIS_RINGS_WIDE
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+    SDL_DestroyTexture(h->hero_texture);h->hero_texture=NULL;
+    SDL_DestroyTexture(h->hero_spill);h->hero_spill=NULL;
+#endif
     free(h->zoom_pixels);h->zoom_pixels=NULL;
     SDL_DestroyTexture(h->zoom_world);h->zoom_world=NULL;
     SDL_DestroyTexture(h->zoom_ui);h->zoom_ui=NULL;
@@ -141,6 +151,7 @@ static uint8_t sdl_pad_key(SDL_Keycode key) {
     }
 }
 #include "rings_mouse_sdl.h"
+#include "rings_pad_sdl.h"
 static void sdl_host_rebase(SDLHost *h, const CPU *c) {
     h->origin_counter=SDL_GetPerformanceCounter(); h->origin_master=c->master_cycles;
 }
@@ -149,6 +160,91 @@ static void sdl_host_rebase(SDLHost *h, const CPU *c) {
 #ifdef GENESIS_RINGS_WIDE
 /* Keep the original scene pixels until SDL maps them to drawable pixels.
    The UI mask is a separate native-resolution layer, never zoomed. */
+static unsigned rings_scene_percent(const SDLHost *h,const VDP *v) {
+    return v->native_scene ? 100:h->zoom_percent;
+}
+static int rings_native_view(const SDLHost *h,const VDP *v) {
+    return !rings_view_wide(v) && rings_scene_percent(h,v)==100 && v->native_world_valid;
+}
+static int rings_native_index(unsigned p) {
+    int x=(int)(p%RINGS_ZOOM_WIDTH)-RINGS_ZOOM_LEFT-40;
+    int y=(int)(p/RINGS_ZOOM_WIDTH)-RINGS_ZOOM_TOP;
+    return x>=0 && x<288 && y>=0 && y<184 ? y*288+x:-1;
+}
+static unsigned rings_world_ink(const SDLHost *h,const VDP *v,unsigned p) {
+    if(!rings_native_view(h,v))return v->zoom_scene[p];
+    int at=rings_native_index(p);return at>=0 ? v->native_world[at]:0;
+}
+static int rings_world_lift(const SDLHost *h,const VDP *v,unsigned p) {
+    if(!rings_native_view(h,v))return v->zoom_lift[p];
+    int at=rings_native_index(p);return at>=0 ? v->native_lift[at]:0;
+}
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+static const RingsHeroLayer *rings_hero_layer(const SDLHost *h,const VDP *v) {
+    return rings_native_view(h,v) ? &v->native_hero:&v->hero;
+}
+static int rings_hero_split(const SDLHost *h,const VDP *v) {
+    return h->camera.enabled && v->camera.valid && rings_hero_layer(h,v)->valid;
+}
+static int rings_hero_index(const SDLHost *h,const VDP *v,unsigned x,unsigned y) {
+    const RingsHeroLayer *a=rings_hero_layer(h,v);
+    return a->valid && x>=a->x && x<a->x+128u && y>=a->y && y<a->y+128u ?
+        (int)((y-a->y)*128+x-a->x):-1;
+}
+static unsigned rings_hero_world_ink(const SDLHost *h,const VDP *v,unsigned p) {
+    int at=rings_hero_split(h,v) ? rings_hero_index(h,v,p%RINGS_ZOOM_WIDTH,p/RINGS_ZOOM_WIDTH):-1;
+    return at>=0 ? rings_hero_layer(h,v)->under[at]:rings_world_ink(h,v,p);
+}
+static int rings_hero_world_lift(const SDLHost *h,const VDP *v,unsigned p) {
+    int at=rings_hero_split(h,v) ? rings_hero_index(h,v,p%RINGS_ZOOM_WIDTH,p/RINGS_ZOOM_WIDTH):-1;
+    return at>=0 ? rings_hero_layer(h,v)->under_lift[at]:rings_world_lift(h,v,p);
+}
+static int sdl_host_hero_upload(SDLHost *h,const VDP *v) {
+    if(!rings_hero_split(h,v))return 1;
+    const RingsHeroLayer *a=rings_hero_layer(h,v);
+    SDL_Texture **layers[]={&h->hero_texture,&h->hero_spill};
+    int hx=rings_camera_round(h->camera.hx),hy=rings_camera_round(h->camera.hy);
+    int cx=rings_camera_round(h->camera.x),cy=rings_camera_round(h->camera.y);
+    for(unsigned layer=0;layer<2;++layer) {
+        if(!*layers[layer]) {
+            *layers[layer]=SDL_CreateTexture(h->renderer,SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STREAMING,RINGS_ZOOM_WIDTH,RINGS_ZOOM_HEIGHT);
+            if(!*layers[layer] || SDL_SetTextureBlendMode(*layers[layer],SDL_BLENDMODE_BLEND))
+                return sdl_host_error(h,"player texture creation failed");
+            /* Share the world's source grid. A cropped actor texture gets a
+               different nearest-neighbor phase at fractional window scales. */
+            memset(h->zoom_pixels,0,RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT*4);
+            if(SDL_UpdateTexture(*layers[layer],NULL,h->zoom_pixels,RINGS_ZOOM_WIDTH*4))
+                return sdl_host_error(h,"player texture clear failed");
+        }
+        if(h->hero_tex_x!=a->x || h->hero_tex_y!=a->y) {
+            SDL_Rect old={(int)h->hero_tex_x,(int)h->hero_tex_y,128,128};
+            memset(h->zoom_pixels,0,128*128*4);
+            if(SDL_UpdateTexture(*layers[layer],&old,h->zoom_pixels,128*4))
+                return sdl_host_error(h,"old player texture clear failed");
+        }
+        for(unsigned p=0;p<128*128;++p) {
+            unsigned ink=a->ink[p];int x=(int)(p%128)+hx,y=(int)(p/128)+hy;
+            int covered=x>=0 && x<128 && y>=0 && y<128 && a->cover[y*128+x];
+            int sx=a->x+(int)(p%128)+hx,sy=a->y+(int)(p/128)+hy;
+            int lift=(int)a->ground_y+hy-sy;
+            int spill=!layer || (lift>0 && rings_zoom_ground_spill(v,sx,sy,ink,(unsigned)lift,rings_scene_percent(h,v),cx,cy));
+            uint8_t *out=h->zoom_pixels+p*4;memcpy(out,v->zoom_palette+ink*3,3);
+            out[3]=ink && !covered && spill ? 255:0;
+        }
+        SDL_Rect region={a->x,a->y,128,128};
+        if(SDL_UpdateTexture(*layers[layer],&region,h->zoom_pixels,128*4))return sdl_host_error(h,"player texture upload failed");
+    }
+    h->hero_dx=hx;h->hero_dy=hy;h->hero_tex_x=a->x;h->hero_tex_y=a->y;return 1;
+}
+static int sdl_host_hero_draw(SDLHost *h,const VDP *v,const SDL_FRect *world,int spill) {
+    if(!rings_hero_split(h,v))return 1;
+    double scale=(double)world->w/RINGS_ZOOM_WIDTH;
+    SDL_FRect to=*world;
+    to.x+=(float)(h->camera.hx*scale);to.y+=(float)(h->camera.hy*scale);
+    return SDL_RenderCopyF(h->renderer,spill ? h->hero_spill:h->hero_texture,NULL,&to) ?
+        sdl_host_error(h,"player presentation failed"):1;
+}
+#endif
 static int sdl_host_spill_upload(SDLHost *h,const VDP *v) {
     int dx=0,dy=0;
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
@@ -156,9 +252,13 @@ static int sdl_host_spill_upload(SDLHost *h,const VDP *v) {
     h->spill_x=dx;h->spill_y=dy;
 #endif
     for(unsigned y=0;y<RINGS_ZOOM_HEIGHT;++y)for(unsigned x=0;x<RINGS_ZOOM_WIDTH;++x) {
-        unsigned p=y*RINGS_ZOOM_WIDTH+x,ink=v->zoom_scene[p];uint8_t *out=h->zoom_pixels+p*4;
+        unsigned p=y*RINGS_ZOOM_WIDTH+x,ink=rings_world_ink(h,v,p);int lift=rings_world_lift(h,v,p);
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+        ink=rings_hero_world_ink(h,v,p);lift=rings_hero_world_lift(h,v,p);
+#endif
+        uint8_t *out=h->zoom_pixels+p*4;
         memcpy(out,v->zoom_palette+ink*3,3);
-        out[3]=rings_zoom_spill_shift(v,(int)x,(int)y,h->zoom_percent,dx,dy) ? 255:0;
+        out[3]=rings_zoom_ground_spill(v,(int)x,(int)y,ink,lift,rings_scene_percent(h,v),dx,dy) ? 255:0;
     }
     return SDL_UpdateTexture(h->zoom_spill,NULL,h->zoom_pixels,RINGS_ZOOM_WIDTH*4) ? sdl_host_error(h,"zoom elevated upload failed"):1;
 }
@@ -183,7 +283,11 @@ static int sdl_host_zoom_upload(SDLHost *h,const VDP *v,const uint8_t *base) {
         memcpy(h->zoom_pixels+p*3,v->zoom_restore[p] ? v->zoom_background+p*3:base+p*3,3);
     if(SDL_UpdateTexture(h->texture,NULL,h->zoom_pixels,h->width*3))return sdl_host_error(h,"zoom background upload failed");
     for(unsigned p=0;p<RINGS_ZOOM_WIDTH*RINGS_ZOOM_HEIGHT;++p) {
-        unsigned ink=v->zoom_scene[p];uint8_t *out=h->zoom_pixels+p*4;
+        unsigned ink=rings_world_ink(h,v,p);
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+        ink=rings_hero_world_ink(h,v,p);
+#endif
+        uint8_t *out=h->zoom_pixels+p*4;
         memcpy(out,v->zoom_palette+ink*3,3);out[3]=ink ? 255:0;
     }
     if(SDL_UpdateTexture(h->zoom_world,NULL,h->zoom_pixels,RINGS_ZOOM_WIDTH*4))return sdl_host_error(h,"zoom scene upload failed");
@@ -192,6 +296,9 @@ static int sdl_host_zoom_upload(SDLHost *h,const VDP *v,const uint8_t *base) {
         h->zoom_pixels[p*4+3]=v->zoom_mask[p] ? 0:255;
     }
     if(SDL_UpdateTexture(h->zoom_ui,NULL,h->zoom_pixels,h->width*4))return sdl_host_error(h,"zoom interface upload failed");
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+    if(!sdl_host_hero_upload(h,v))return 0;
+#endif
     if(rings_view_wide(v))return 1;
     if(!h->zoom_spill) {
         h->zoom_spill=SDL_CreateTexture(h->renderer,SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STREAMING,
@@ -220,11 +327,11 @@ static int sdl_host_zoom_draw(SDLHost *h,const VDP *v) {
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
     camera_x=h->camera.x;camera_y=h->camera.y;
 #endif
-    RingsWindowLayout canvas=rings_window_layout(v,width,height,h->zoom_percent,camera_x,camera_y);
+    RingsWindowLayout canvas=rings_window_layout(v,width,height,rings_scene_percent(h,v),camera_x,camera_y);
     double scale=canvas.world_scale;
     SDL_Rect viewport={0,0,(int)(h->width*scale+0.5),(int)(h->height*scale+0.5)};
     viewport.x=(int)(canvas.world_x+0.5);viewport.y=(int)(canvas.world_y+0.5);
-    double zoom=h->zoom_percent/100.0;
+    double zoom=rings_scene_percent(h,v)/100.0;
     int target_x=(int)v->zoom_focus_x-RINGS_ZOOM_LEFT+16-(rings_view_wide(v) ? 0:40);
     int target_y=(int)v->zoom_focus_y-RINGS_ZOOM_TOP;
     double world_x=canvas.adaptive ? canvas.world_x:viewport.x;
@@ -240,6 +347,9 @@ static int sdl_host_zoom_draw(SDLHost *h,const VDP *v) {
         SDL_SetRenderDrawColor(h->renderer,v->zoom_background[0],v->zoom_background[1],v->zoom_background[2],255);
         if(SDL_RenderClear(h->renderer) || SDL_RenderCopyF(h->renderer,h->zoom_world,NULL,&world))
             return sdl_host_error(h,"adaptive world presentation failed");
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+        if(!sdl_host_hero_draw(h,v,&world,0))return 0;
+#endif
         for(unsigned i=0;i<3;++i) {
             RingsWindowBand band=rings_window_ui_band(&canvas,i);
             SDL_Rect source={band.x,band.y,band.w,band.h};
@@ -251,10 +361,17 @@ static int sdl_host_zoom_draw(SDLHost *h,const VDP *v) {
         SDL_SetRenderDrawColor(h->renderer,0,0,0,255);
     } else if(SDL_RenderClear(h->renderer) || SDL_RenderCopy(h->renderer,h->texture,NULL,&viewport) ||
        SDL_RenderSetClipRect(h->renderer,&viewport) || SDL_RenderCopyF(h->renderer,h->zoom_world,NULL,&world) ||
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+       !sdl_host_hero_draw(h,v,&world,0) ||
+#endif
        SDL_RenderSetClipRect(h->renderer,NULL) || SDL_RenderCopy(h->renderer,h->zoom_ui,NULL,&viewport))
         return sdl_host_error(h,"zoom presentation failed");
     if(!rings_view_wide(v) && (SDL_RenderSetClipRect(h->renderer,&viewport) ||
-       SDL_RenderCopyF(h->renderer,h->zoom_spill,NULL,&world) || SDL_RenderSetClipRect(h->renderer,NULL) ||
+       SDL_RenderCopyF(h->renderer,h->zoom_spill,NULL,&world) ||
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+       !sdl_host_hero_draw(h,v,&world,1) ||
+#endif
+       SDL_RenderSetClipRect(h->renderer,NULL) ||
        SDL_RenderCopy(h->renderer,h->zoom_guard,NULL,&viewport)))return sdl_host_error(h,"zoom elevated presentation failed");
 #ifdef GENESIS_RINGS_MENU_FONT
     if(h->font.path && v->font_enabled) {
@@ -292,10 +409,12 @@ static int sdl_host_draw(SDLHost *h, const VDP *v) {
     }
     int upload=texture_changed || h->last_frame!=v->rendered_frames;
 #ifdef GENESIS_RINGS_WIDE
-    int zoom_active=v->zoom_world_visible && (rings_view_wide(v) || (v->zoom_enabled && h->zoom_percent!=100));
+    int zoom_active=v->zoom_world_visible && (rings_view_wide(v) || v->zoom_enabled);
 #ifdef GENESIS_RINGS_SMOOTH_CAMERA
-    zoom_active|=h->camera.enabled && v->zoom_world_visible && v->camera.valid;
+    zoom_active|=h->camera.enabled && v->camera.valid &&
+        (v->zoom_world_visible || (v->native_scene && v->native_world_valid));
     upload|=h->last_smooth!=zoom_active;h->last_smooth=zoom_active;
+    int hero_split=rings_hero_split(h,v);upload|=h->last_hero_split!=hero_split;h->last_hero_split=hero_split;
 #endif
     upload|=zoom_active && (!h->zoom_ui || h->zoom_width!=h->width || h->zoom_height!=h->height);
     upload|=h->last_zoom!=h->zoom_percent;
@@ -327,6 +446,11 @@ static int sdl_host_draw(SDLHost *h, const VDP *v) {
         if(!upload && !rings_view_wide(v) &&
            (h->spill_x!=rings_camera_round(h->camera.x) || h->spill_y!=rings_camera_round(h->camera.y)))
             if(!sdl_host_spill_upload(h,v))return 0;
+#endif
+#ifdef GENESIS_RINGS_SMOOTH_CAMERA
+        if(!upload && rings_hero_split(h,v) && (h->hero_dx!=rings_camera_round(h->camera.hx) ||
+           h->hero_dy!=rings_camera_round(h->camera.hy) || !rings_view_wide(v)))
+            if(!sdl_host_hero_upload(h,v))return 0;
 #endif
         return sdl_host_zoom_draw(h,v);
     }
@@ -383,7 +507,12 @@ static int sdl_host_service(SDLHost *h, CPU *c) {
         if(remapping!=h->settings.remap)redraw=1;
         if(assigned) {redraw=1;continue;}
 #endif
-        if(sdl_pad_event(&h->input,&event,input_menu))continue;
+        if(sdl_pad_event(&h->input,&event,input_menu)) {
+#ifdef GENESIS_RINGS_WIDE
+            rings_pad_sample(h,c,sdl_pad_buttons(&h->input,input_menu));
+#endif
+            continue;
+        }
         if(event.type==SDL_KEYUP)h->input.keyboard&=(uint8_t)~sdl_pad_key(event.key.keysym.sym);
         if(event.type==SDL_WINDOWEVENT && event.window.event==SDL_WINDOWEVENT_FOCUS_LOST) {
             h->input.focused=0;sdl_pad_clear(&h->input);c->pad_buttons[0]=0;
@@ -430,8 +559,8 @@ static int sdl_host_service(SDLHost *h, CPU *c) {
 #endif
                 }
             }
-            if((event.type==SDL_MOUSEBUTTONDOWN && event.button.button==SDL_BUTTON_MIDDLE) ||
-               (event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_0)) {
+            if(!c->vdp.native_scene && ((event.type==SDL_MOUSEBUTTONDOWN && event.button.button==SDL_BUTTON_MIDDLE) ||
+               (event.type==SDL_KEYDOWN && !event.key.repeat && event.key.keysym.sym==SDLK_0))) {
                 h->zoom_percent=100;redraw=1;
 #ifdef GENESIS_RINGS_SAVES
                 h->settings.saved_zoom=100;
@@ -468,6 +597,9 @@ static int sdl_host_service(SDLHost *h, CPU *c) {
                 SDL_SetWindowTitle(h->window,h->paused ? "RROP - paused":"RROP");
             }
         }
+#ifdef GENESIS_RINGS_WIDE
+        rings_pad_sample(h,c,sdl_pad_buttons(&h->input,input_menu));
+#endif
     }
     int input_suspended=h->paused || h->stopped || c->fault;
 #ifdef GENESIS_RINGS_SAVES
@@ -486,6 +618,7 @@ static int sdl_host_service(SDLHost *h, CPU *c) {
     rings_camera_update(&h->camera,&c->vdp,c->master_cycles,vdp_master_frequency(&c->vdp),h->zoom_percent);
 #endif
 #ifdef GENESIS_RINGS_WIDE
+    rings_pad_sample(h,c,c->pad_buttons[0]);
     rings_mouse_update(h,c);
 #endif
     if (redraw || h->last_frame!=c->vdp.rendered_frames)

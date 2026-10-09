@@ -32,14 +32,14 @@ static void scene(CPU *c,RingsWide *w) {
 
 
 class RingsWideTests(CompiledTestCase):
-    def check(self, body, resource=False, looping=False):
+    def check(self, body, resource=False, looping=False, smooth=False):
         rom=bytearray(0x100000 if resource else 0x1b960 if looping else 0x400)
         rom[:0x400]=rom_with('4e72 2700')
         if resource:
             rom[0x603e4:0x603eb]=bytes([0x21,0x10,0x23,0x12,0x04,0,0])
         if looping:rom[0x1b950:0x1b952]=bytes.fromhex('60fe')
         p=analyze(bytes(rom),[0x200,*([0x1b950] if looping else [])])
-        source='#define GENESIS_NO_MAIN\n#define GENESIS_RINGS_WIDE\n'+emit(p)
+        source='#define GENESIS_NO_MAIN\n#define GENESIS_RINGS_WIDE\n'+('#define GENESIS_RINGS_SMOOTH_CAMERA\n' if smooth else '')+emit(p)
         source+='\n#include <assert.h>\n'+SCENE+'\nint main(void) { CPU *c=calloc(1,sizeof *c);assert(c);RingsWide w={0};(void)w;c->rom=rom_data;c->rom_size=sizeof rom_data;\n'+body+'\nfree(c);return 0;}'
         binary=self.compile(source)
         result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=15)
@@ -80,6 +80,58 @@ w.grid=80;w.resource_ground=50;
 assert(rings_wide_resource(c,w.zoom_work,RINGS_ZOOM_WIDTH,RINGS_ZOOM_HEIGHT,0,64,0,0,0));
 assert(w.lift_work[2]==4);
 ''',resource=True)
+
+    def test_terrain_roofs_have_intrinsic_lift_above_the_flat_tile_footprint(self):
+        self.check(r'''
+assert(rings_resource_lift(0,0,0,1)==13);
+assert(rings_resource_lift(0,0,13,1)==7);
+assert(rings_resource_lift(14,0,27,1)==27);
+assert(!rings_resource_lift(0,14,13,1));
+assert(!rings_resource_lift(0,0,13,0));
+assert(rings_resource_lift(300,0,0,1)==255);
+/* Height belongs to the final writer; transparent nibbles retain ownership. */
+c->wide=&w;w.replaying=1;w.grid=32;w.resource_actor=2;w.resource_ground=0;
+memset(w.lift_work,5,sizeof w.lift_work);
+assert(rings_wide_resource(c,w.zoom_work,960,704,0,64,0,0,0));
+assert(w.lift_work[2]==12 && w.lift_work[3]==5 && w.lift_work[4]==11);
+''',resource=True)
+
+    def test_native_snapshot_is_published_with_the_same_completed_scene(self):
+        self.check(r'''
+scene(c,&w);c->vdp.wide_enabled=0;c->vdp.zoom_enabled=1;
+c->ram[0x8674]=0;c->ram[0x8675]=128;
+w.pending=w.zoom_pending=w.native_pending=1;
+memset(w.zoom_work,2,sizeof w.zoom_work);memset(w.native_work,3,sizeof w.native_work);
+memset(w.native_lift_work,17,sizeof w.native_lift_work);
+rings_wide_commit(c);assert(w.native_valid && !w.native_pending);
+vdp_render(c);assert(c->vdp.native_world_valid && c->vdp.native_world[0]==3);
+assert(c->vdp.native_lift[0]==17 && c->vdp.zoom_scene[0]==2);
+/* Mutable work and later scene RAM cannot change a paused frame. */
+memset(w.native_work,1,sizeof w.native_work);memset(w.native_scene,4,sizeof w.native_scene);
+assert(c->vdp.native_world[0]==3);
+rings_scene_discard(c);vdp_render(c);assert(!c->vdp.native_world_valid);
+''')
+
+    def test_player_layer_retains_terrain_and_later_foreground_through_resource_writes(self):
+        self.check(r'''
+c->wide=&w;w.replaying=1;w.grid=32;w.resource_actor=1;w.resource_ground=360;
+memset(w.zoom_work,7,sizeof w.zoom_work);memset(w.lift_work,5,sizeof w.lift_work);
+rings_hero_begin(&w,194,83,0);assert(w.hero_work.valid && w.hero_work.x==416 && w.hero_work.y==260);
+w.tracking_player=1;
+assert(rings_wide_resource(c,w.zoom_work,960,704,0,64,356,0,416));
+unsigned p=96*128+2,q=356*960+418;
+assert(w.hero_work.ink[p]==1 && w.hero_work.under[p]==7 && !w.hero_work.cover[p]);
+assert(w.hero_work.under_lift[p]==5 && w.zoom_work[q]==1 && w.lift_work[q]==4);
+/* A later foreground writer covers the actor and becomes its true underlay. */
+uint8_t *rom=malloc(sizeof rom_data);assert(rom);memcpy(rom,rom_data,sizeof rom_data);
+rom[0x603e5]=0x56;c->rom=rom;w.tracking_player=0;w.resource_actor=0;w.resource_ground=0;
+assert(rings_wide_resource(c,w.zoom_work,960,704,0,64,356,0,416));
+assert(w.hero_work.ink[p]==1 && w.hero_work.under[p]==5 && w.hero_work.cover[p]);
+assert(!w.hero_work.under_lift[p] && w.zoom_work[q]==5);
+assert(!w.hero_work.ink[p+1] && w.hero_work.under[p+1]==6 && w.hero_work.cover[p+1]);
+assert(w.hero_work.under[p+6]==7); /* Transparent pixels preserve prior terrain. */
+free(rom);
+''',resource=True,smooth=True)
 
     def test_packed_resource_rounds_odd_x_down_like_the_original_writer(self):
         self.check(r'''
@@ -217,7 +269,7 @@ class RingsWideROMTests(CompiledTestCase):
         source='#define GENESIS_NO_MAIN\n#define GENESIS_RINGS_WIDE\n'+emit(program)+r'''
 #include <assert.h>
 int main(void) {
- CPU *c=calloc(1,sizeof *c);assert(c);uint8_t expected[288*184];
+ CPU *c=calloc(1,sizeof *c);RingsWide *w=calloc(1,sizeof *w);assert(c && w);uint8_t expected[288*184];
  unsigned ids[]={0,1,17,125,560,750,943};int ys[]={-22,-7,0,146};
  for(unsigned id=0;id<sizeof ids/sizeof *ids;++id)
  for(unsigned flip=0;flip<2;++flip)
@@ -233,16 +285,20 @@ int main(void) {
   assert(!c->fault && c->pc==0x400);
   memset(expected,0,sizeof expected);
   assert(rings_wide_resource(c,expected,288,184,ids[id],96+odd,ys[yi],flip,0));
+  c->wide=w;w->replaying=1;w->grid=10;memset(w->zoom_work,0,sizeof w->zoom_work);
+  assert(rings_wide_resource(c,w->zoom_work,960,704,ids[id],96+odd,
+      ys[yi]+RINGS_ZOOM_TOP,flip,RINGS_ZOOM_LEFT+40));
   for(unsigned y=0;y<184;++y)for(unsigned x=0;x<288;++x) {
    unsigned at=0x1ec0+((y/8)*36+x/8)*32+(y%8)*4+(x%8)/2;
    unsigned value=(c->ram[at]>>(x%2 ? 0:4))&15;
-   if(value!=expected[y*288+x]) {
+   unsigned native=w->zoom_work[(y+RINGS_ZOOM_TOP)*960+x+RINGS_ZOOM_LEFT+40];
+   if(value!=expected[y*288+x] || value!=native) {
     fprintf(stderr,"id=%u flip=%u x=%u y=%d pixel=%u,%u original=%u wide=%u\n",
         ids[id],flip,96+odd,ys[yi],x,y,value,expected[y*288+x]);return 1;
    }
   }
  }
- free(c);return 0;
+ free(w);free(c);return 0;
 }
 '''
         binary=self.compile(source)
