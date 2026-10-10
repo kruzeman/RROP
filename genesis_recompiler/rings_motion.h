@@ -13,8 +13,8 @@ static int rings_motion_scene(const CPU *c) {
 static int rings_motion_revision(CPU *c) {
     /* Independent guards for the routines entered and the main-loop boundary.
        Translation still requires the full verified ROM SHA-256. */
-    const unsigned at[]={0xd2be,0x24984,0x1b918,0x1b950,0x1b9ee,0x1386a};
-    const unsigned op[]={0x4a79,0x4e56,0x4e56,0x4a79,0x4fef,0x4e56};
+    const unsigned at[]={0xd2be,0x24984,0x1b918,0x1b950,0x1b9ee,0x1386a,0x26cca};
+    const unsigned op[]={0x4a79,0x4e56,0x4e56,0x4a79,0x4fef,0x4e56,0x4e56};
     if(c->rom_size<0x100000)return 0;
     for(unsigned i=0;i<sizeof at/sizeof *at;++i)if(read_mem(c,at[i],2)!=op[i])return 0;
     return !c->fault;
@@ -82,11 +82,22 @@ static int rings_motion_player(CPU *source,unsigned direction) {
 static int rings_motion_redraw(CPU *c) {
     uint32_t d[8],a[8],pc=c->pc;uint16_t sr=c->sr;
     memcpy(d,c->d,sizeof d);memcpy(a,c->a,sizeof a);
-    c->ram[0x99]=1;push32(c,0xffffff);c->pc=0x1b918;unsigned steps=0;
+    /* Drain the location panel queue before the accelerated bitmap pass,
+       matching the native main loop's UI-before-world drawing order. */
+    unsigned steps=0;
+    c->a[7]-=2;write_mem(c,c->a[7],2,1);push32(c,0xffffff);c->pc=0x26cca;
+    while(!c->fault && !c->halted && c->pc!=0xffffff && steps++<1000000) {
+        if(c->pc==0x1386a) {rings_motion_blank(c);continue;}
+        translated_step(c);
+    }
+    c->a[7]+=2;
+    if(c->fault || c->halted || c->pc!=0xffffff)goto finish;
+    c->ram[0x99]=1;push32(c,0xffffff);c->pc=0x1b918;
     while(!c->fault && !c->halted && c->pc!=0xffffff && steps++<1000000) {
         if(c->pc==0x1386a) {rings_motion_blank(c);continue;}
         rings_wide_observe(c);translated_step(c);
     }
+finish:;
     int ok=!c->fault && !c->halted && c->pc==0xffffff;
     c->steps+=steps;c->pc=pc;c->sr=sr;memcpy(c->d,d,sizeof d);memcpy(c->a,a,sizeof a);
     c->instruction_cycles=0;

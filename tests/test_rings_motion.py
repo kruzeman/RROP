@@ -10,12 +10,12 @@ class RingsMotionTests(CompiledTestCase):
     def setUpClass(cls):sdl_tests.SDLTests.setUpClass.__func__(cls)
     compile_sdl=sdl_tests.SDLTests.compile_sdl
     run_sdl=sdl_tests.SDLTests.run_sdl
-    def check(self,body,helper='5279 00ff0e8e 5279 00ff02c0 4e75'):
-        rom=bytearray(0x25000);rom[:0x400]=rom_with('4e72 2700')
+    def check(self,body,helper='5279 00ff0e8e 5279 00ff02c0 4e75',ui='4e75'):
+        rom=bytearray(0x27000);rom[:0x400]=rom_with('4e72 2700')
         for at,code in [(0xd2be,'4e71'),(0x1b918,'4e75'),(0x1b950,'4e71 4ef9 0001b9ee'),
-                        (0x1b9ee,'4e75'),(0x24984,helper)]:
+                        (0x1b9ee,'4e75'),(0x26cca,ui),(0x24984,helper)]:
             data=bytes.fromhex(code);rom[at:at+len(data)]=data
-        p=analyze(bytes(rom),[0x200,0x1b918,0x1b950,0x24984])
+        p=analyze(bytes(rom),[0x200,0x1b918,0x1b950,0x24984,0x26cca])
         self.assertFalse(p.errors)
         source='#define GENESIS_NO_MAIN\n#define GENESIS_RINGS_WIDE\n#define GENESIS_RINGS_SAVES\n'+emit(p)
         source+='\n#include <assert.h>\n'+r'''
@@ -44,6 +44,16 @@ assert(!memcmp(regs,c->d,32) && !memcmp(regs+8,c->a,32));assert(c->sr==0x2000);
 assert(c->master_cycles==1000+256*7 && m->player_budget==56*7);
 assert(rings_motion_before(c));assert(m->moves==1 && c->ram[0xe8f]==1);
 ''')
+
+    def test_location_queue_is_drained_before_accelerated_world_redraw(self):
+        self.check(r'''
+uint32_t regs[16];memcpy(regs,c->d,32);memcpy(regs+8,c->a,32);
+c->ram[0xe18]=1;c->ram[0xe19]=0;c->ram[0xe7f]=1;
+assert(rings_motion_redraw(c));assert(c->ram[0xe18]==c->ram[0xe19]);
+assert(!c->ram[0xe7f]);assert(c->pc==0xd2be && c->sr==0x2000);
+assert(!memcmp(regs,c->d,32) && !memcmp(regs+8,c->a,32));
+assert(!m->moves && c->master_cycles==1000);
+''',ui='4239 00ff0e18 4239 00ff0e19 4279 00ff0e7e 4e75')
 
     def test_held_direction_respects_cooldown_and_release_cannot_repeat_fifo_direction(self):
         self.check(r'''
