@@ -13,11 +13,11 @@ static int rings_motion_scene(const CPU *c) {
 static int rings_motion_revision(CPU *c) {
     /* Independent guards for the routines entered and the main-loop boundary.
        Translation still requires the full verified ROM SHA-256. */
-    const unsigned at[]={0xd2be,0x24984,0x1b918,0x1b950,0x1b9ee,0x1386a,0x26cca};
-    const unsigned op[]={0x4a79,0x4e56,0x4e56,0x4a79,0x4fef,0x4e56,0x4e56};
+    const unsigned at[]={0xd2be,0x24984,0x1b918,0x1b950,0x1b9ee,0x1386a,0x26cca,0xd2e0};
+    const unsigned op[]={0x4a79,0x4e56,0x4e56,0x4a79,0x4fef,0x4e56,0x4e56,0x4eb9};
     if(c->rom_size<0x100000)return 0;
     for(unsigned i=0;i<sizeof at/sizeof *at;++i)if(read_mem(c,at[i],2)!=op[i])return 0;
-    return !c->fault;
+    return !c->fault && read_mem(c,0xd2e2,4)==0x2155e;
 }
 static unsigned rings_motion_direction(unsigned pad) {
     return pad==PAD_UP ? 0:pad==PAD_RIGHT ? 1:pad==PAD_DOWN ? 2:pad==PAD_LEFT ? 3:4;
@@ -110,6 +110,15 @@ static int rings_motion_before(CPU *c) {
     if(!m->enabled)return 0;
     if(!m->verified) {
         if(!rings_motion_revision(c)) {m->enabled=0;return 0;}m->verified=1;
+    }
+    /* The menu still needs the native command loop and VBlank input. Skip
+       only its ordinary world-update call; closing it starts a fresh turn. */
+    if(c->pc==0xd2e0 && rings_scene_word(c,0xac) &&
+       (c->vdp.wide_enabled || c->vdp.zoom_enabled) && !rings_scene_native(c)) {
+        m->active=m->drawing=m->finish=0;m->fallback=0;
+        m->due=m->next_step=m->player_budget=0;
+        if(m->intent)m->intent->pending=0;
+        c->pc=0xd2e6;c->instruction_cycles=0;++c->steps;return 1;
     }
     if(c->pc==0x1386a && m->drawing) {rings_motion_blank(c);++c->steps;return 1;}
     if(c->pc==0x1b9ee && m->drawing) {m->drawing=0;m->finish=1;}

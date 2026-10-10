@@ -85,6 +85,64 @@ v->registers[17]=0;vdp_render(c);assert(!v->wide_hud_active && !v->wide_world_vi
 for(unsigned y=0;y<224;++y)assert(!memcmp(v->wide_frame+(y*400+40)*3,v->frame+y*320*3,320*3));
 ''')
 
+    def test_native_menu_keeps_footer_tiles_in_place_and_hides_relocated_scroll(self):
+        self.check(r'''
+vdp_render(c);assert(v->wide_hud_active);
+/* Start menu reuses footer coordinates while the old labels remain in VRAM. */
+c->ram[0xad]=1;vdp_render(c);
+assert(rings_hud_layout(v) && !v->wide_hud_active && v->wide_world_visible);
+unsigned native=(160*400+48+40)*3,relocated=(96*400+20)*3;
+assert(v->wide_frame[native+1]==255 && !v->wide_frame[native]);
+assert(v->wide_frame[relocated+1]==255 && !v->wide_frame[relocated]);
+assert(v->zoom_mask[96*400+20] && v->zoom_mask[160*400+88]);
+/* Menu parchment tiles are retained even inside the old text rectangles. */
+hud_word(v,0x1000+(20*64+11)*2,0x8380);
+memset(v->vram+0x380*32,0x11,32);vdp_render(c);
+assert(!v->zoom_mask[160*400+128]);
+/* Both the relocated compass and its original position reveal the world. */
+assert(v->zoom_mask[171*400+57] && v->zoom_mask[171*400+232]);
+assert(v->zoom_mask[192*400+152]); /* Original F/W bars are hidden too. */
+c->ram[0xad]=0;vdp_render(c);assert(v->wide_hud_active);
+assert(!c->steps && !c->master_cycles);
+''')
+
+    def test_player_hp_is_numeric_only_in_enhanced_combat_and_tracks_damage(self):
+        self.check(r'''
+c->ram[0xa7fd]=0xff;c->ram[0xa7fe]=0xb0;c->ram[0xa7ff]=0xbc;
+v->frame_width=320;v->frame_height=224;v->zoom_enabled=1;
+c->ram[0xe7f]=4;c->ram[0xe81]=1;
+unsigned a=0x2b4+52;c->ram[a+1]=4;c->ram[a+39]=0;c->ram[a+29]=20;c->ram[a+33]=20;c->ram[a+30]=3;c->ram[a+31]=232;c->ram[a+34]=3;c->ram[a+35]=232;
+/* Native font tiles, deliberately unlike the previous built-in digit shapes. */
+c->ram[0x8640]=1;c->ram[0x8641]=0;v->cram[1]=0x222;
+for(unsigned ch='0';ch<='9';++ch) {
+    unsigned tile=0x100+ch-32;memset(v->vram+tile*32,0,32);
+    v->vram[tile*32]=(uint8_t)(0x10|(ch-'0'));
+}
+uint8_t ram[65536],vram[65536];memcpy(ram,c->ram,sizeof ram);memcpy(vram,v->vram,sizeof vram);
+memset(v->frame,255,sizeof v->frame);
+rings_hp_frame(c,v->frame);assert(v->frame[(170*320+80)*3]==255);
+assert(v->frame[(170*320+80)*3+1]==0 && v->frame[(170*320+80)*3+2]==0);
+assert(v->frame[(180*320+80)*3]==0 && v->frame[(180*320+80)*3+2]==255);
+assert(v->frame[(171*320+80)*3]==255 && !memcmp(vram,v->vram,sizeof vram));
+assert(v->frame[(170*320+270)*3]==255 && !memcmp(ram,c->ram,sizeof ram));
+uint8_t before[320*240*3];memcpy(before,v->frame,sizeof before);
+c->ram[a+29]=7;memset(v->frame,255,sizeof v->frame);rings_hp_frame(c,v->frame);
+assert(memcmp(before,v->frame,sizeof before));
+v->zoom_enabled=0;memset(v->frame,255,sizeof v->frame);rings_hp_frame(c,v->frame);
+assert(v->frame[(170*320+80)*3]==255);
+v->zoom_enabled=1;c->ram[0xad]=1;rings_hp_frame(c,v->frame);
+/* Fight/Flee menu keeps the combat footer placement, not Start's layout. */
+assert(v->frame[(180*320+80)*3]==0 && v->frame[(180*320+80)*3+2]==255);
+assert(v->frame[(116*320+20)*3]==255);
+c->ram[0xa7ff]=0;memset(v->frame,255,sizeof v->frame);rings_hp_frame(c,v->frame);
+assert(v->frame[(106*320+60)*3]==255 && v->frame[(106*320+60)*3+2]==0);
+assert(v->frame[(116*320+20)*3]==0 && v->frame[(116*320+20)*3+2]==255);
+/* Start-menu values also survive wide composition and remain fixed during zoom. */
+memset(v->wide_frame,255,sizeof v->wide_frame);memset(v->zoom_mask,1,sizeof v->zoom_mask);
+rings_hp_draw(c,v->wide_frame,400,40,1);
+assert(v->wide_frame[(116*400+60)*3+2]==255 && !v->zoom_mask[116*400+60]);
+''')
+
     def test_current_values_follow_live_tiles_without_cached_strings(self):
         self.check(r'''
 vdp_render(c);uint8_t before[400*240*3];memcpy(before,v->wide_frame,sizeof before);

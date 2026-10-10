@@ -90,6 +90,22 @@ c->pc=0xd2be;m->turn=500;m->draw_budget=30000;m->player_budget=2000;m->finish=1;
 assert(rings_motion_before(c));assert(m->period==32500 && m->due==33000 && !m->player_budget && !m->finish);
 ''')
 
+    def test_start_menu_skips_world_update_but_keeps_native_menu_loop(self):
+        self.check(r'''
+c->pc=0xd2e0;c->ram[0xad]=1;
+m->drawing=m->finish=1;m->fallback=PAD_RIGHT;h.pad_intent.pending=PAD_RIGHT;
+uint32_t regs[16];memcpy(regs,c->d,32);memcpy(regs+8,c->a,32);
+assert(rings_motion_before(c));assert(c->pc==0xd2e6 && c->master_cycles==1000);
+assert(!m->active && !m->drawing && !m->finish && !m->fallback && !h.pad_intent.pending);
+assert(!memcmp(regs,c->d,32) && !memcmp(regs+8,c->a,32));
+/* Closing the menu restores the original update call without catching up. */
+c->ram[0xad]=0;c->pc=0xd2e0;assert(!rings_motion_before(c));assert(c->pc==0xd2e0);
+c->pc=0x2155e;assert(!rings_motion_before(c));assert(m->active && m->turn==1000);
+/* Classic and fixed indoor scenes retain their native behavior. */
+c->pc=0xd2e0;c->ram[0xad]=1;m->enabled=0;assert(!rings_motion_before(c));
+m->enabled=1;c->ram[0xaf]=2;assert(!rings_motion_before(c));
+''')
+
     def test_classic_scene_actions_and_loaded_state_do_not_carry_a_stale_deadline(self):
         self.check(r'''
 for(unsigned reason=0;reason<5;++reason) {

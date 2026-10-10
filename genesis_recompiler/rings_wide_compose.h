@@ -39,7 +39,8 @@ static unsigned rings_wide_ui_pixel(const VDP *v,const uint8_t *sprites,unsigned
     return ink&63;
 }
 /* Wide coordinates map to the same live ink used by the native renderer. */
-static unsigned rings_wide_interface(const VDP *v,const uint8_t *sprites,unsigned x,unsigned y) {
+static unsigned rings_wide_interface(const CPU *c,const uint8_t *sprites,unsigned x,unsigned y) {
+    const VDP *v=&c->vdp;
     if(v->wide_hud_active) {
         unsigned ink=rings_hud_paper(sprites,(int)x,(int)y);
         for(unsigned i=0;i<4;++i) {
@@ -68,15 +69,36 @@ static unsigned rings_wide_interface(const VDP *v,const uint8_t *sprites,unsigne
     }
     if(x<40 || x>=360)return 0;
     unsigned gx=x-40;
-    if(v->wide_hud_active && (rings_hud_zone((int)gx,(int)y)>=0 ||
-       rings_hud_contains((int)gx,(int)y,160,160,80,56)))return 0;
+    if(v->wide_hud_active && rings_hud_zone((int)gx,(int)y)>=0)return 0;
+    int menu=rings_scene_word(c,0xac)!=0;
+    if(menu && rings_hud_zone((int)gx,(int)y)==2)return 0;
+    if((v->wide_hud_active || menu) &&
+       rings_hud_contains((int)gx,(int)y,160,160,80,56))return 0;
+    unsigned zone=(unsigned)rings_hud_zone((int)gx,(int)y);
+    if(menu && zone<2) {
+        /* The native footer glyphs survive behind Start's sprite parchment.
+           Suppress only font tiles, keeping the menu paper and borders intact. */
+        unsigned entry=vdp_word(v,0x1000+((y/8)*64+gx/8)*2);
+        unsigned anchor=vdp_word(v,0x1000+(20*64+6)*2);
+        unsigned base=(anchor&0x7ff)-('G'-32),tile=entry&0x7ff;
+        if((anchor&0x8000) && rings_hud_label(v,anchor-('G'-32),48,160,"Gold") &&
+           tile>=base && tile<base+96) {
+            unsigned b=vdp_plane_pixel(v,1,gx,y),sprite=sprites[y*v->frame_width+gx],ink=0;
+            if(sprite&15)ink=sprite;
+            if((b&128) && (b&15))ink=b;
+            if((sprite&128) && (sprite&15))ink=sprite;
+            return ink&63;
+        }
+    }
     return rings_wide_ui_pixel(v,sprites,gx,y);
 }
 static void rings_wide_compose(CPU *c,const uint8_t *sprites,const uint8_t *base,uint8_t *out) {
     VDP *v=&c->vdp;RingsWide *w=c->wide;
     unsigned width=v->frame_width,height=v->frame_height,offset=(RINGS_WIDE_WIDTH-width)/2;
     int visible=rings_wide_visible(c) && w->zoom_valid;v->wide_world_visible=(uint8_t)visible;
-    v->wide_hud_active=(uint8_t)(visible && rings_hud_layout(v));
+    /* Native menus reuse the footer tiles for their parchment. Relocating
+       those tiles cuts holes in the menu and duplicates its paper as a HUD. */
+    v->wide_hud_active=(uint8_t)(visible && !rings_scene_word(c,0xac) && rings_hud_layout(v));
     unsigned backdrop=v->cram[v->registers[7]&63];
     uint8_t background[3]={vdp_channel((backdrop>>1)&7,1),vdp_channel((backdrop>>5)&7,1),vdp_channel((backdrop>>9)&7,1)};
     for(unsigned y=0;y<height;++y)for(unsigned x=0;x<RINGS_WIDE_WIDTH;++x) {
@@ -85,7 +107,7 @@ static void rings_wide_compose(CPU *c,const uint8_t *sprites,const uint8_t *base
         unsigned gx=central ? x-offset:0;
         if(!visible) {memcpy(pixel,central ? base+(y*width+gx)*3:background,3);continue;}
         unsigned ink=w->zoom_scene[(y+RINGS_ZOOM_TOP)*RINGS_ZOOM_WIDTH+x+RINGS_ZOOM_LEFT-16];
-        unsigned ui=rings_wide_interface(v,sprites,x,y);
+        unsigned ui=rings_wide_interface(c,sprites,x,y);
         if(ui)ink=ui;
         if(!ink) {memcpy(pixel,background,3);continue;}
         unsigned rgb=v->cram[ink];

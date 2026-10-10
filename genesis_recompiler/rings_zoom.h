@@ -69,7 +69,7 @@ static void rings_zoom_prepare(CPU *c,const uint8_t *sprites) {
 #ifdef GENESIS_RINGS_MENU_FONT
             v->font_hide=(uint8_t)!!v->font_count;
 #endif
-            unsigned ui=rings_wide_interface(v,sprites,x,y);
+            unsigned ui=rings_wide_interface(c,sprites,x,y);
 #ifdef GENESIS_RINGS_MENU_FONT
             v->font_hide=0;
 #endif

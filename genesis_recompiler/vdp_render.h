@@ -134,6 +134,7 @@ static void vdp_render_pixels(VDP *v,unsigned width,unsigned height,const uint8_
     }
 }
 #include "rings_wide_compose.h"
+#include "rings_hp.h"
 #include "rings_zoom.h"
 static void vdp_render(CPU *c) {
     VDP *v=&c->vdp;
@@ -159,6 +160,10 @@ static void vdp_render(CPU *c) {
     }
 #endif
 #ifdef GENESIS_RINGS_WIDE
+    if(!rings_scene_word(c,0xac))rings_hp_frame(c,v->frame);
+#ifdef GENESIS_RINGS_MENU_FONT
+    if(v->font_count && !rings_scene_word(c,0xac))rings_hp_frame(c,v->font_frame);
+#endif
     rings_scene_snapshot(c);
     v->wide_hud_active=0;
     if(v->wide_enabled && c->wide && !c->wide->replaying) {
@@ -172,6 +177,19 @@ static void vdp_render(CPU *c) {
 #endif
     }
     if((v->zoom_enabled || v->wide_enabled) && c->wide && !c->wide->replaying)rings_zoom_prepare(c,sprites);
+#endif
+#ifdef GENESIS_RINGS_WIDE
+    if(rings_scene_word(c,0xac)) {
+        unsigned view_width=rings_view_width(v),offset=(view_width-width)/2;
+        rings_hp_draw(c,v->frame,width,0,0);
+        if(rings_view_wide(v))rings_hp_draw(c,v->wide_frame,view_width,offset,1);
+#ifdef GENESIS_RINGS_MENU_FONT
+        if(v->font_count) {
+            rings_hp_draw(c,v->font_frame,width,0,0);
+            if(rings_view_wide(v))rings_hp_draw(c,v->wide_font_frame,view_width,offset,1);
+        }
+#endif
+    }
 #endif
     v->frame_width=(uint16_t)width; v->frame_height=(uint16_t)height;
     ++v->rendered_frames;
