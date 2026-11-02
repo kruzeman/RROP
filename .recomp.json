@@ -1,0 +1,10 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Rings of Power",
+  "wikidata": "Q1970728",
+  "system": "Genesis",
+  "type": "recomp",
+  "targets": ["Linux", "Windows"],
+  "status": "in-progress",
+  "toolchain": "GenesisRecomp"
+}
