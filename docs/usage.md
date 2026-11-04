@@ -112,8 +112,29 @@ with `--text-renderer rings-text` and launch with `--font /path/to/font.ttf`.
 Check the tools without a game ROM using `make demo` and `make test`.
 Window tests use SDL's dummy driver; verify a visible window and audible
 sound by launching the game from a regular Terminal or Finder session.
-The executable targets the current Mac; a universal `.app` and portable
-library bundle are not packaged yet.
+### Finder app without a Terminal window
+
+After the normal SDL build, package it locally:
+
+```sh
+python3 examples/build_macos_app.py
+open build/RROP.app
+```
+
+Double-click `RROP.app` to play without opening Terminal. The app enables the
+same mouse, zoom, widescreen and smooth-camera options as the `.command`
+launcher. It can move elsewhere on the same Mac, but still uses installed
+SDL libraries. It targets the current architecture, is ad-hoc signed locally,
+and is not notarized. The embedded ROM makes the app unsuitable for uploading.
+
+The app stores `launch.log` and a `saves/` directory in
+`~/Library/Application Support/RROP/`. To continue existing saves and Settings,
+copy the project's `saves/` directory there before playing; existing saves are
+not moved automatically. Startup errors are recorded in `launch.log`.
+
+To rebuild, move the old app aside or use `--output '/path/to/RROP.app'`.
+Use `--binary '/path/to/rings-of-power'` to package a different existing
+native SDL executable. External fonts remain user-supplied files.
 
 ## Windows
 
